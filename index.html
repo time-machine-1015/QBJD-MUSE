@@ -1949,6 +1949,18 @@ void main() {
     frameBody(now);
   }
 
+  /* 全屏遮罩打开时（登录层/查看器/弹窗），流光不绘制、画布保持透明，杜绝残影透出 */
+  function modalOpenMasked() {
+    const ids = ["photoViewer", "memoLayer", "storyModal", "commentsModal"];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el && !el.hidden) return true;
+    }
+    const ll = document.getElementById("loginLayer");
+    if (ll && !ll.classList.contains("hidden") && !ll.classList.contains("leaving")) return true;
+    return false;
+  }
+
   function frameBody(now) {
     gl.viewport(0, 0, canvas.width, canvas.height);   /* viewport 不会随 canvas 尺寸自动更新，每帧显式设置 */
     raf = 0;
@@ -1956,6 +1968,7 @@ void main() {
     last = now;
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    if (modalOpenMasked()) { last = 0; return; }      /* 遮罩打开：不绘制流光，也不调度下一帧 */
     gl.useProgram(prog);
     let active = false;
     const VH = window.innerHeight, VW = window.innerWidth;
@@ -1976,7 +1989,7 @@ void main() {
       if (Math.abs(diff) > 0.0002 || Math.abs(level - en.level) > 0.001 || en.press > 0.002) active = true;
     }
     if (active) raf = requestAnimationFrame(frame);
-    else last = 0;
+    else { last = 0; gl.clear(gl.COLOR_BUFFER_BIT); }  /* 动画停止：清空画布，杜绝残影停留在全屏层 */
   }
 
   function wake() { if (!raf && gl && entries.size) raf = requestAnimationFrame(frame); }
@@ -2015,6 +2028,7 @@ void main() {
       for (const [el] of entries) el.removeEventListener("pointerdown", onPress);
       entries.clear();
     },
+    wake,
   };
 })();
 
@@ -2300,6 +2314,7 @@ const photoViewer = (() => {
       V.hidden = true;
       resetCard();
       img.src = "";
+      specularGlow.wake();
     }, 400);
   }
 
@@ -2550,7 +2565,7 @@ const memoViewer = (() => {
     const L = $("memoLayer");
     L.classList.remove("show");
     document.body.classList.remove("lock-scroll");
-    setTimeout(() => { L.hidden = true; }, 480);
+    setTimeout(() => { L.hidden = true; specularGlow.wake(); }, 480);
     cancelAnimationFrame(raf);
     state = null;
     const cv = $("memoCanvas");
@@ -2586,7 +2601,7 @@ function showStoryModal(id) {
 function hideStoryModal() {
   const modal = $("storyModal");
   modal.classList.remove("show");
-  setTimeout(() => { modal.hidden = true; }, 320);
+  setTimeout(() => { modal.hidden = true; specularGlow.wake(); }, 320);
 }
 $("btnMemoEdit").addEventListener("click", () => showStoryModal(memoViewer.currentId()));
 $("btnStoryCancel").addEventListener("click", hideStoryModal);
@@ -2636,7 +2651,7 @@ function showCommentsModal(id) {
 function hideCommentsModal() {
   const modal = $("commentsModal");
   modal.classList.remove("show");
-  setTimeout(() => { modal.hidden = true; }, 320);
+  setTimeout(() => { modal.hidden = true; specularGlow.wake(); }, 320);
 }
 
 function renderCommentsList(m) {
@@ -4029,7 +4044,7 @@ function enterPlayer(name) {
   loginVideo.stop();
   trueFocus.stop();
   applySeasonBg(seasonIdx);
-  setTimeout(() => { loginLayer.classList.add("hidden"); }, 750);
+  setTimeout(() => { loginLayer.classList.add("hidden"); specularGlow.wake(); }, 750);
   userBox.hidden = false;
   userNameEl.textContent = name;
   userAvatar.textContent = name.trim().charAt(0).toUpperCase() || "友";
