@@ -609,6 +609,29 @@ body.lock-scroll { overflow: hidden; }
 .story-actions .primary { background: linear-gradient(135deg, #a78bfa, #f472b6); color: #fff; box-shadow: 0 10px 28px rgba(167,139,250,0.4); }
 .story-actions .primary:hover { transform: translateY(-1px); }
 
+/* 评论弹窗（复用故事弹窗玻璃风）：每条评论带作者署名 */
+.cmt-box { display: flex; flex-direction: column; max-height: min(640px, calc(100vh - 48px)); }
+.cmt-meta { font-size: 12.5px; color: #7a7396; margin: -6px 0 12px; letter-spacing: 0.3px; }
+.cmt-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; margin-bottom: 14px; }
+.cmt-item { padding: 10px 14px; background: rgba(255,255,255,0.6); border: 1px solid rgba(139,124,195,0.22); border-radius: 14px; }
+.cmt-item.mine { background: rgba(167,139,250,0.10); border-color: rgba(167,139,250,0.35); }
+.cmt-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.cmt-author { font-size: 12px; font-weight: 700; color: #6d5cc7; letter-spacing: 0.4px; }
+.cmt-time { font-size: 11px; color: #a29ec0; }
+.cmt-del { margin-left: auto; border: none; background: none; color: #c95c8a; font-size: 11.5px; cursor: pointer; opacity: 0.75; font-family: inherit; }
+.cmt-del:hover { opacity: 1; }
+.cmt-text { font-size: 14px; color: #3a3550; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+.cmt-empty { text-align: center; color: #a29ec0; font-size: 13px; padding: 18px 0; }
+.cmt-input { display: flex; gap: 10px; align-items: flex-end; }
+.cmt-input textarea { flex: 1; min-height: 70px; max-height: 160px; }
+.cmt-input .primary { padding: 10px 18px; border: none; border-radius: 12px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; background: linear-gradient(135deg, #a78bfa, #f472b6); color: #fff; box-shadow: 0 10px 28px rgba(167,139,250,0.4); white-space: nowrap; transition: transform 0.2s ease; }
+.cmt-input .primary:hover { transform: translateY(-1px); }
+.cmt-input .primary:disabled { opacity: 0.6; cursor: wait; }
+@media (max-width: 520px) {
+  .cmt-input { flex-direction: column; align-items: stretch; }
+  .cmt-input .primary { width: 100%; }
+}
+
 /* toast（深色玻璃，深浅两版页面通用） */
 .toast {
   position: fixed; left: 50%; bottom: 34px;
@@ -1123,6 +1146,22 @@ body.lock-scroll { overflow: hidden; }
   </div>
 </div>
 
+<!-- 评论弹窗：每条评论带作者署名 -->
+<div class="story-modal" id="commentsModal" hidden>
+  <div class="story-box cmt-box">
+    <h3>✦ 大家的评论</h3>
+    <p class="cmt-meta" id="cmtMeta"></p>
+    <div class="cmt-list" id="cmtList"></div>
+    <div class="cmt-input">
+      <textarea id="cmtText" rows="2" placeholder="写一句你们的回忆……发表后会署上你的名字"></textarea>
+      <button class="primary" id="btnCmtSend">发表</button>
+    </div>
+    <div class="story-actions">
+      <button class="ghost" id="btnCmtClose">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1200,8 +1239,9 @@ try {
 } catch (_) { cloud = null; }
 const remoteMode = () => !!cloud;
 
-/* 访客标识：区分不同人的点赞（存本机，换浏览器算新访客） */
-const VISITOR = (() => {
+/* 访客标识：跟当前登录名走（换账号登录 = 换身份，点赞/评论按人隔离）
+   未登录时回退设备 UUID（兼容旧数据）；账号在任何设备登录都是同一个人 */
+const DEVICE_VISITOR = (() => {
   try {
     let v = localStorage.getItem("muse_visitor");
     if (!v) {
@@ -1211,6 +1251,15 @@ const VISITOR = (() => {
     return v;
   } catch (_) { return "local-" + Date.now(); }
 })();
+/* 点赞标识：登录名（小写）；旧 UUID 点过的赞在新账号下视为未点赞 */
+const currentVisitor = () => {
+  const name = currentUserName();
+  return name ? "user:" + name.toLowerCase() : DEVICE_VISITOR;
+};
+/* 当前登录名（原样大小写，用作评论/上传署名；SESSION_KEY 在登录层定义） */
+const currentUserName = () => {
+  try { return (sessionStorage.getItem("muse_user") || "").trim(); } catch (_) { return ""; }
+};
 
 const storageUrl = (path) => `${CLOUD.SUPABASE_URL}/storage/v1/object/public/photos/${path}`;
 
@@ -1233,21 +1282,31 @@ async function checkAllowedName(name) {
   } catch (_) { return "error"; }
 }
 
-/* 云端读取：memories 全表 + 我点过的赞，内存拼接 */
+/* 云端读取：memories 全表 + 我点过的赞 + 全部评论，内存拼接 */
 async function loadMemoriesRemote() {
-  const [rowsR, likesR] = await Promise.all([
+  const [rowsR, likesR, cmtsR] = await Promise.all([
     cloud.from("memories").select("*").order("created_at", { ascending: false }),
-    cloud.from("memory_likes").select("memory_id").eq("visitor", VISITOR),
+    cloud.from("memory_likes").select("memory_id").eq("visitor", currentVisitor()),
+    cloud.from("memory_comments").select("*").order("created_at", { ascending: true }),
   ]);
   if (rowsR.error) throw rowsR.error;
   const likedSet = new Set((likesR.data || []).map((r) => r.memory_id));
+  /* 评论表还没建（SQL 未跑）时 cmtsR.error 有值 → 评论区功能静默降级，不影响照片墙 */
+  const cmtsMap = new Map();
+  (cmtsR.data || []).forEach((c) => {
+    const key = String(c.memory_id);
+    if (!cmtsMap.has(key)) cmtsMap.set(key, []);
+    cmtsMap.get(key).push({ id: c.id, author: c.author || "", text: c.text || "", createdAt: +new Date(c.created_at) });
+  });
   memories = (rowsR.data || []).map((r) => ({
     id: r.id,
     createdAt: +new Date(r.created_at),
     story: r.story || "",
+    author: r.author || "",                 // 上传者（列未建时为空，兼容）
     season: r.season,
     likes: r.likes || 0,
     liked: likedSet.has(r.id),          // 复用本地字段名，UI 无需感知模式
+    comments: cmtsMap.get(String(r.id)) || [],
     image_path: r.image_path,
     url: storageUrl(r.image_path),
     w: r.w, h: r.h,
@@ -1287,10 +1346,19 @@ async function addMemoryRemote(file) {
     contentType: blob.type || "image/jpeg", upsert: false,
   });
   if (up.error) throw up.error;
-  const ins = await cloud.from("memories").insert({
+  const ins0 = await cloud.from("memories").insert({
     story: "", season: seasonIdx, likes: 0,
     image_path: path, w: dim.w, h: dim.h,
+    author: currentUserName(),              // 上传者署名
   }).select().single();
+  /* 兼容：author 列还没建（SQL 未跑）时重试不带署名，保证上传不被卡住 */
+  let ins = ins0;
+  if (ins.error && /PGRST204|column|not exist/i.test(ins.error.message || "")) {
+    ins = await cloud.from("memories").insert({
+      story: "", season: seasonIdx, likes: 0,
+      image_path: path, w: dim.w, h: dim.h,
+    }).select().single();
+  }
   if (ins.error) {
     cloud.storage.from("photos").remove([path]).catch(() => {});
     throw ins.error;
@@ -1301,20 +1369,36 @@ async function addMemoryRemote(file) {
 /* 云端点赞：访客点赞表增删 + 原子计数 RPC（失败抛出，调用方负责回滚提示） */
 async function toggleLikeRemote(m, nextLiked) {
   const op = nextLiked
-    ? cloud.from("memory_likes").insert({ memory_id: m.id, visitor: VISITOR })
-    : cloud.from("memory_likes").delete().eq("memory_id", m.id).eq("visitor", VISITOR);
+    ? cloud.from("memory_likes").insert({ memory_id: m.id, visitor: currentVisitor() })
+    : cloud.from("memory_likes").delete().eq("memory_id", m.id).eq("visitor", currentVisitor());
   const r = await op;
   if (r.error) throw r.error;
   const b = await cloud.rpc("bump_likes", { m_id: m.id, delta: nextLiked ? 1 : -1 });
   if (b.error) throw b.error;
 }
 
-/* 云端删除：删行（点赞表级联）→ 删存储图片 */
+/* 云端删除：删行（点赞/评论级联）→ 删存储图片 */
 async function deleteMemoryRemote(id) {
   const m = memories.find((x) => x.id === id);
   const r = await cloud.from("memories").delete().eq("id", id);
   if (r.error) throw r.error;
   if (m?.image_path) cloud.storage.from("photos").remove([m.image_path]).catch(() => {});
+}
+
+/* 云端评论：发表（署名当前登录人） */
+async function addCommentRemote(memoryId, text) {
+  const ins = await cloud.from("memory_comments")
+    .insert({ memory_id: memoryId, author: currentUserName(), text })
+    .select().single();
+  if (ins.error) throw ins.error;
+  return ins.data;
+}
+
+/* 云端评论：删除（仅本人的评论可删） */
+async function deleteCommentRemote(commentId) {
+  const r = await cloud.from("memory_comments")
+    .delete().eq("id", commentId).eq("author", currentUserName());
+  if (r.error) throw r.error;
 }
 
 /* 故事行数 = 评论数（一行一句回忆，对应粒子查看器逐行浮现） */
@@ -1407,18 +1491,18 @@ function renderGrid() {
     });
     actions.appendChild(heartBtn);
 
-    /* 评论：SpecularButton 流光边框（点击写下这段故事） */
+    /* 评论：SpecularButton 流光边框（点开大家的评论，每条带署名） */
     const cmtBtn = document.createElement("button");
     cmtBtn.type = "button";
     cmtBtn.className = "specular-button";
-    cmtBtn.title = "写下这段故事";
-    cmtBtn.setAttribute("aria-label", "评论，写下这段故事");
+    cmtBtn.title = "大家的评论";
+    cmtBtn.setAttribute("aria-label", "评论，看看大家说了什么");
     cmtBtn.innerHTML = `
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="${CHAT_ICON}"></path></svg>
-      <span>${storyLines(m.story)}</span>`;
+      <span>${(m.comments || []).length}</span>`;
     cmtBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      showStoryModal(m.id);
+      showCommentsModal(m.id);
     });
     actions.appendChild(cmtBtn);
     specularGlow.register(cmtBtn);
@@ -2030,6 +2114,8 @@ $("fileInput").addEventListener("change", async (e) => {
         await memDB.put({
           id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)),
           story: "", createdAt: ts(), blob: file, w: dim.w, h: dim.h,
+          author: currentUserName(),          // 上传者署名
+          comments: [],
           season: seasonIdx,   // 存入当前停留的板块（在哪个页面添加，就存进哪个季节）
         });
       }
@@ -2525,10 +2611,106 @@ $("btnStorySave").addEventListener("click", async () => {
   toast("这段故事已收好 ✦");
 });
 
-/* Esc 关闭（层级：故事弹窗 > 照片查看器 > 粒子查看器） */
+/* ---------- 四b、评论弹窗：每条评论带作者署名，可发表/删除自己的 ---------- */
+function fmtCmtTime(ts) {
+  const diff = Date.now() - +new Date(ts);
+  if (diff < 60e3) return "刚刚";
+  if (diff < 3600e3) return Math.floor(diff / 60e3) + " 分钟前";
+  if (diff < 86400e3) return Math.floor(diff / 3600e3) + " 小时前";
+  return fmtDate(ts);
+}
+
+function showCommentsModal(id) {
+  const m = memories.find((x) => x.id === id);
+  if (!m) return;
+  const modal = $("commentsModal");
+  modal.dataset.id = id;
+  $("cmtMeta").textContent = `${fmtDate(m.createdAt)} 上传${m.author ? " · " + m.author : ""}`;
+  renderCommentsList(m);
+  $("cmtText").value = "";
+  modal.hidden = false;
+  requestAnimationFrame(() => modal.classList.add("show"));
+  setTimeout(() => $("cmtText").focus(), 150);
+}
+
+function hideCommentsModal() {
+  const modal = $("commentsModal");
+  modal.classList.remove("show");
+  setTimeout(() => { modal.hidden = true; }, 320);
+}
+
+function renderCommentsList(m) {
+  const list = m.comments || [];
+  const box = $("cmtList");
+  if (!list.length) {
+    box.innerHTML = `<div class="cmt-empty">还没有人留下评论，写下第一句吧 ✦</div>`;
+    return;
+  }
+  const me = currentUserName();
+  box.innerHTML = list.map((c) => `
+    <div class="cmt-item${c.author === me ? " mine" : ""}" data-cid="${c.id}">
+      <div class="cmt-head">
+        <span class="cmt-author">${escapeHtml(c.author || "神秘人")}</span>
+        <span class="cmt-time">${fmtCmtTime(c.createdAt)}</span>
+        ${c.author === me ? `<button class="cmt-del" title="删除我的评论">删除</button>` : ""}
+      </div>
+      <div class="cmt-text">${escapeHtml(c.text)}</div>
+    </div>`).join("");
+  box.querySelectorAll(".cmt-del").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const cid = btn.closest(".cmt-item").dataset.cid;
+      const m2 = memories.find((x) => x.id === $("commentsModal").dataset.id);
+      if (!m2) return;
+      try {
+        if (remoteMode()) await deleteCommentRemote(cid);
+        m2.comments = (m2.comments || []).filter((c) => String(c.id) !== String(cid));
+        if (!remoteMode()) await memDB.put(m2);
+        renderCommentsList(m2);
+        renderGrid();
+      } catch (_) { toast("删除失败，请重试"); }
+    });
+  });
+}
+
+$("btnCmtClose").addEventListener("click", hideCommentsModal);
+$("commentsModal").addEventListener("click", (e) => { if (e.target.id === "commentsModal") hideCommentsModal(); });
+
+$("btnCmtSend").addEventListener("click", async () => {
+  const id = $("commentsModal").dataset.id;
+  const m = memories.find((x) => x.id === id);
+  if (!m) { hideCommentsModal(); return; }
+  const text = $("cmtText").value.trim();
+  const author = currentUserName();
+  if (!text) { toast("先写点什么再发表吧"); return; }
+  if (!author) { toast("登录后才能发表评论"); return; }
+  const btn = $("btnCmtSend");
+  btn.disabled = true;
+  try {
+    if (remoteMode()) {
+      const row = await addCommentRemote(m.id, text);
+      m.comments = [...(m.comments || []), { id: row.id, author: row.author, text: row.text, createdAt: +new Date(row.created_at) }];
+    } else {
+      m.comments = [...(m.comments || []), {
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+        author, text, createdAt: Date.now(),
+      }];
+      await memDB.put(m);
+    }
+    $("cmtText").value = "";
+    renderCommentsList(m);
+    renderGrid();
+    toast("评论已留下 ✦");
+  } catch (err) {
+    toast(/PGRST205|Could not find the table|does not exist/i.test(String(err && err.message))
+      ? "评论功能还没初始化，请先在 Supabase 运行评论 SQL" : "发表失败，请重试");
+  } finally { btn.disabled = false; }
+});
+
+/* Esc 关闭（层级：故事弹窗 > 评论弹窗 > 照片查看器 > 粒子查看器） */
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!$("storyModal").hidden) hideStoryModal();
+  else if (!$("commentsModal").hidden) hideCommentsModal();
   else if (!$("photoViewer").hidden) photoViewer.close();
   else if (!$("memoLayer").hidden) memoViewer.close();
 });
@@ -3900,6 +4082,9 @@ loginForm.addEventListener("submit", async (e) => {
   try { localStorage.setItem("muse_name", name); } catch (_) {}
   enterPlayer(name);
   toast(`欢迎回来，${name}`);
+  /* 换账号后按新身份重新拉取：点赞状态/评论权限按登录名隔离 */
+  try { await loadMemories(); } catch (_) {}
+  renderGrid();
 });
 
 /* 输入即时清除错误提示 */
