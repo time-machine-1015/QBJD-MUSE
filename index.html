@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QBJD MUSE · 回忆收集站</title>
+<meta name="theme-color" content="#120f17">
+<link rel="manifest" href="./manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <!-- Supabase 浏览器 SDK（共享模式用；加载失败时自动退回本地模式，不影响使用） -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
@@ -183,6 +189,19 @@ header {
 }
 .btn-add:hover { transform: translateY(-2px); box-shadow: 0 16px 44px rgba(244,114,182,0.5), inset 0 1px 0 rgba(255,255,255,0.35); }
 .btn-add:active { transform: scale(0.97); }
+.btn-cam {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 13px 20px;
+  border: 1px solid rgba(255,255,255,0.28); border-radius: 16px;
+  background: rgba(255,255,255,0.07);
+  font-family: inherit; font-size: 14.5px; font-weight: 700; letter-spacing: 1px;
+  color: var(--text); cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: transform 0.2s ease, background 0.25s ease;
+}
+.btn-cam:hover { background: rgba(255,255,255,0.13); transform: translateY(-2px); }
+.btn-cam:active { transform: scale(0.97); }
+.hero-actions { display: flex; align-items: center; gap: 10px; }
 
 /* 回忆墙（毛玻璃卡片网格） */
 .mem-grid {
@@ -1087,9 +1106,11 @@ body.lock-scroll { overflow: hidden; }
       <h2 id="memTitle">我们的回忆墙</h2>
       <p id="memSub">每张照片，都是一段想留住的时间</p>
     </div>
-    <div>
+    <div class="hero-actions">
       <button class="btn-add" id="btnAdd">＋ 添加回忆</button>
+      <button class="btn-cam" id="btnCam">拍照直传</button>
       <input type="file" id="fileInput" accept="image/*" multiple hidden>
+      <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
     </div>
   </section>
 
@@ -2111,9 +2132,8 @@ const seasonSeg = (() => {
   return {};
 })();
 
-/* 上传照片 */
-$("btnAdd").addEventListener("click", () => $("fileInput").click());
-$("fileInput").addEventListener("change", async (e) => {
+/* 上传照片：相册多选 + 拍照直传（手机） */
+async function handleFiles(e) {
   const files = [...e.target.files];
   e.target.value = "";
   if (!files.length) return;
@@ -2143,7 +2163,11 @@ $("fileInput").addEventListener("change", async (e) => {
   } else if (failed) {
     toast("上传失败，请检查网络后重试");
   }
-});
+}
+$("btnAdd").addEventListener("click", () => $("fileInput").click());
+$("btnCam").addEventListener("click", () => $("cameraInput").click());
+$("fileInput").addEventListener("change", handleFiles);
+$("cameraInput").addEventListener("change", handleFiles);
 
 function ts() { return Date.now(); }
 
@@ -4140,6 +4164,13 @@ try {
 } catch (_) {
   loginVideo.start();
   trueFocus.start();
+}
+
+/* ---------- PWA：注册 Service Worker（离线壳缓存，HTTPS/本地生效） ---------- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  });
 }
 </script>
 </body>
