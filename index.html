@@ -10,8 +10,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="./icon-192.png">
-<!-- Supabase 浏览器 SDK（共享模式用；加载失败时自动退回本地模式，不影响使用） -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<!-- Supabase 浏览器 SDK（本地托管，不依赖第三方 CDN——避免国内网络访问 CDN 卡顿阻塞页面渲染） -->
+<script src="./supabase.min.js"></script>
 <style>
 /* ============ 基础 ============ */
 * { margin: 0; padding: 0; box-sizing: border-box; }
