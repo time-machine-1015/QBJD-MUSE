@@ -4119,6 +4119,7 @@ loginForm.addEventListener("submit", async (e) => {
 
   try { sessionStorage.setItem(SESSION_KEY, name); } catch (_) {}
   try { localStorage.setItem("muse_name", name); } catch (_) {}
+  try { localStorage.setItem("muse_auto_login", name); } catch (_) {}   // 自动登录：下次打开直接进影
   enterPlayer(name);
   toast(`欢迎回来，${name}`);
   /* 换账号后按新身份重新拉取：点赞状态/评论权限按登录名隔离 */
@@ -4141,6 +4142,7 @@ togglePwd.addEventListener("click", () => {
 /* 退出登录 */
 btnLogout.addEventListener("click", () => {
   try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+  try { localStorage.removeItem("muse_auto_login"); } catch (_) {}   // 退出后清除自动登录
   showLogin();
 });
 
@@ -4158,8 +4160,15 @@ if (remoteMode()) {
   if (wallFoot) wallFoot.textContent = "QBJD MUSE · 回忆收集站 · 大家共用的回忆墙";
 }
 try {
-  const saved = sessionStorage.getItem(SESSION_KEY);
-  if (saved) { loginLayer.classList.add("hidden"); enterPlayer(saved); }
+  /* 自动登录：会话内有登录态，或之前勾选过“记住我”（localStorage）都直接进影 */
+  const saved = sessionStorage.getItem(SESSION_KEY) || localStorage.getItem("muse_auto_login");
+  if (saved) {
+    if (!sessionStorage.getItem(SESSION_KEY)) {
+      try { sessionStorage.setItem(SESSION_KEY, saved); } catch (_) {}
+    }
+    loginLayer.classList.add("hidden");
+    enterPlayer(saved);
+  }
   else { loginVideo.start(); trueFocus.start(); }
 } catch (_) {
   loginVideo.start();
