@@ -310,7 +310,7 @@ header {
 .specular-button svg path { fill: rgba(236, 232, 246, 0.85); transition: fill 0.2s ease; }
 .specular-button:hover svg path { fill: #ffffff; }
 
-/* 删除（二次确认） */
+/* 删除按钮 */
 .mem-del {
   position: absolute; top: 10px; right: 10px;
   width: 30px; height: 30px;
@@ -325,15 +325,25 @@ header {
 }
 .mem-card:hover .mem-del { opacity: 0.92; }
 .mem-del:hover { background: rgba(40,32,58,0.85); transform: scale(1.08); }
-.mem-del-confirm {
-  position: absolute; inset: 0;
-  display: none; place-items: center;
-  background: rgba(18,15,23,0.86);
-  backdrop-filter: blur(6px);
-  font-size: 13.5px; font-weight: 600; color: #e8a0c0;
-  letter-spacing: 1px;
+
+/* 删除确认弹窗 */
+.confirm-box { text-align: center; }
+.confirm-box h3 { margin-bottom: 8px; }
+.confirm-text {
+  font-size: 14px; line-height: 1.8;
+  color: #7a7396;
+  margin: 0 0 6px;
 }
-.mem-card.confirming .mem-del-confirm { display: grid; }
+.confirm-warn {
+  font-size: 12.5px; color: #c95c8a;
+  margin-bottom: 4px;
+}
+.story-actions .danger {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(225,29,72,0.4);
+}
+.story-actions .danger:hover { transform: translateY(-1px); }
 
 /* 空态 */
 .mem-empty {
@@ -1183,6 +1193,19 @@ body.lock-scroll { overflow: hidden; }
   </div>
 </div>
 
+<!-- 删除确认弹窗 -->
+<div class="story-modal" id="confirmModal" hidden>
+  <div class="story-box confirm-box">
+    <h3>✦ 删除这段回忆？</h3>
+    <p class="confirm-text">这张照片和它的故事、评论会一起从云端删除。</p>
+    <p class="confirm-warn">删除后无法恢复，确定吗？</p>
+    <div class="story-actions" style="justify-content:center">
+      <button class="ghost" id="btnConfirmCancel">取消</button>
+      <button class="danger" id="btnConfirmDel">确认删除</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1487,8 +1510,7 @@ function renderGrid() {
       <figcaption>
         <div class="mem-actions"></div>
       </figcaption>
-      <button class="mem-del" title="删除这段回忆">✕</button>
-      <div class="mem-del-confirm">再点一次 ✕ 确认删除</div>`;
+      <button class="mem-del" title="删除这段回忆">✕</button>`;
     const actions = card.querySelector(".mem-actions");
 
     /* 点赞：PulseHeart 脉冲心形（弹簧脉冲 + 数字滚动）；云端模式同步到共享库 */
@@ -1532,20 +1554,9 @@ function renderGrid() {
       if (e.target.closest(".mem-del, .pulse-heart, .specular-button")) return;
       photoViewer.open(m, card.querySelector(".mem-thumb img"));
     });
-    card.querySelector(".mem-del").addEventListener("click", async (e) => {
+    card.querySelector(".mem-del").addEventListener("click", (e) => {
       e.stopPropagation();
-      if (card.classList.contains("confirming")) {
-        try {
-          if (remoteMode()) await deleteMemoryRemote(m.id);
-          else await memDB.del(m.id);
-          await loadMemories();
-          renderGrid();
-          toast("已删除这段回忆");
-        } catch (_) { toast("删除失败，请重试"); }
-      } else {
-        card.classList.add("confirming");
-        setTimeout(() => card.classList.remove("confirming"), 2600);
-      }
+      openDelConfirm(m.id);
     });
     grid.appendChild(card);
   });
@@ -2611,7 +2622,36 @@ const memoViewer = (() => {
   };
 })();
 
-/* ---------- 四、故事编辑弹窗 ---------- */
+/* ---------- 四c、删除确认弹窗 ---------- */
+let pendingDeleteId = null;
+function openDelConfirm(id) {
+  pendingDeleteId = id;
+  const modal = $("confirmModal");
+  modal.hidden = false;
+  requestAnimationFrame(() => modal.classList.add("show"));
+}
+function closeDelConfirm() {
+  const modal = $("confirmModal");
+  modal.classList.remove("show");
+  setTimeout(() => { modal.hidden = true; pendingDeleteId = null; }, 320);
+}
+$("btnConfirmCancel").addEventListener("click", closeDelConfirm);
+$("confirmModal").addEventListener("click", (e) => { if (e.target.id === "confirmModal") closeDelConfirm(); });
+$("btnConfirmDel").addEventListener("click", async () => {
+  const id = pendingDeleteId;
+  closeDelConfirm();
+  const m = memories.find((x) => x.id === id);
+  if (!m) return;
+  try {
+    if (remoteMode()) await deleteMemoryRemote(id);
+    else await memDB.del(id);
+    await loadMemories();
+    renderGrid();
+    toast("已删除这段回忆");
+  } catch (_) { toast("删除失败，请重试"); }
+});
+
+/* ---------- 四d、故事编辑弹窗 ---------- */
 function showStoryModal(id) {
   const m = memories.find((x) => x.id === id);
   if (!m) return;
@@ -2714,8 +2754,7 @@ function renderCommentsList(m) {
 $("btnCmtClose").addEventListener("click", hideCommentsModal);
 $("commentsModal").addEventListener("click", (e) => { if (e.target.id === "commentsModal") hideCommentsModal(); });
 
-$("btnCmtSend").addEventListener("click", async () => {
-  const id = $("commentsModal").dataset.id;
+$("btnCmtSend").addEventListener("click", async () => {  const id = $("commentsModal").dataset.id;
   const m = memories.find((x) => x.id === id);
   if (!m) { hideCommentsModal(); return; }
   const text = $("cmtText").value.trim();
@@ -2745,10 +2784,11 @@ $("btnCmtSend").addEventListener("click", async () => {
   } finally { btn.disabled = false; }
 });
 
-/* Esc 关闭（层级：故事弹窗 > 评论弹窗 > 照片查看器 > 粒子查看器） */
+/* Esc 关闭（层级：删除确认 > 故事弹窗 > 评论弹窗 > 照片查看器 > 粒子查看器） */
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!$("storyModal").hidden) hideStoryModal();
+  if (!$("confirmModal").hidden) closeDelConfirm();
+  else if (!$("storyModal").hidden) hideStoryModal();
   else if (!$("commentsModal").hidden) hideCommentsModal();
   else if (!$("photoViewer").hidden) photoViewer.close();
   else if (!$("memoLayer").hidden) memoViewer.close();
