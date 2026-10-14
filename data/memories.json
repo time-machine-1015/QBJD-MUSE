@@ -1,8 +1,20 @@
 [
   {
+    "id": "1791968460642-4tlrhz.jpeg",
+    "createdAt": 1791968465464,
+    "story": "",
+    "author": "Chenjianhao",
+    "season": 2,
+    "likes": 0,
+    "image_path": "1791968460642-4tlrhz.jpeg",
+    "thumb_path": "thumb_1791968460642-4tlrhz.jpeg",
+    "w": 600,
+    "h": 400
+  },
+  {
     "id": "1791911780302-xx3fpx.jpeg",
     "createdAt": 1791911780302,
-    "story": "故事保存路径测试",
+    "story": "",
     "author": "",
     "season": 2,
     "likes": 0,
