@@ -1470,7 +1470,9 @@ async function toggleLikeRemote(m, nextLiked) {
     const has = lk.some((l) => l.memory_id === m.id && l.visitor === visitor);
     if (nextLiked && has) return;              // 已点过 → 幂等成功
     if (!nextLiked && !has) return;            // 未点过要取消 → 幂等成功
-    const next = nextLiked ? [...lk, { memory_id: m.id, visitor }] : lk.filter((l) => !(l.memory_id === m.id && l.visitor === visitor));
+    const next = nextLiked
+      ? [...lk.filter((l) => !(l.memory_id === m.id && l.visitor === visitor)), { memory_id: m.id, visitor }] /* 先去重再追加：即使读到 CDN 过期数据也不会产生重复记录 */
+      : lk.filter((l) => !(l.memory_id === m.id && l.visitor === visitor));
     await ghWriteText("data/likes.json", next, "like " + m.id);
   };
   let lastErr = null;
@@ -1518,6 +1520,16 @@ async function addCommentRemote(memoryId, text) {
 }
 
 /* 共享评论：删除（仅本人的评论可删） */
+/* 共享故事保存：更新 memories.json 里对应记录的 story（读到过期数据时只改 story 字段，其余保留） */
+async function saveStoryRemote(id, story) {
+  const mem = await ghReadJSON("data/memories.json", []);
+  const list = Array.isArray(mem) ? mem : [];
+  const row = list.find((x) => x.id === id);
+  if (!row) throw new Error("记录不存在");
+  row.story = story;
+  await ghWriteText("data/memories.json", list, "story " + id);
+}
+
 async function deleteCommentRemote(commentId) {
   const comments = await ghReadJSON("data/comments.json", []);
   const cm = Array.isArray(comments) ? comments : [];
@@ -2762,8 +2774,7 @@ $("btnStorySave").addEventListener("click", async () => {
   m.story = $("storyText").value.trim();
   try {
     if (remoteMode()) {
-      const { error } = await cloud.from("memories").update({ story: m.story }).eq("id", id);
-      if (error) throw error;
+      await saveStoryRemote(id, m.story);
     } else {
       await memDB.put(m);
     }
@@ -2851,7 +2862,7 @@ $("btnCmtSend").addEventListener("click", async () => {  const id = $("commentsM
   try {
     if (remoteMode()) {
       const row = await addCommentRemote(m.id, text);
-      m.comments = [...(m.comments || []), { id: row.id, author: row.author, text: row.text, createdAt: +new Date(row.created_at) }];
+      m.comments = [...(m.comments || []), { id: row.id, author: row.author, text: row.text, createdAt: row.createdAt }];
     } else {
       m.comments = [...(m.comments || []), {
         id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
@@ -2864,8 +2875,7 @@ $("btnCmtSend").addEventListener("click", async () => {  const id = $("commentsM
     renderGrid();
     toast("评论已留下 ✦");
   } catch (err) {
-    toast(/PGRST205|Could not find the table|does not exist/i.test(String(err && err.message))
-      ? "评论功能还没初始化，请先在 Supabase 运行评论 SQL" : "发表失败，请重试");
+    toast("发表失败，请重试");
   } finally { btn.disabled = false; }
 });
 
