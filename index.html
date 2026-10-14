@@ -1273,12 +1273,26 @@ const CLOUD = {
   GH_OWNER: "time-machine-1015",
   GH_REPO: "QBJD-MUSE",
   GH_BRANCH: "main",
-  /* Token 用 base64 存放（在浏览器控制台跑 btoa("你的token") 得到编码，粘到这里）：
-     1. 避免明文被扫描吊销；2. 仍仅限本仓库 Contents 读写权限，泄露风险可控 */
-  GH_TOKEN_B64: "",   /* ← 填入 btoa(token) 的结果，填入后点赞/评论/上传生效 */
 };
-const ghToken = () => { try { return CLOUD.GH_TOKEN_B64 ? atob(CLOUD.GH_TOKEN_B64) : ""; } catch (_) { return ""; } };
-const remoteMode = () => !!ghToken();
+/* Token 不写在网页源码里（GitHub 会扫描并拦阻明文/base64 token 推送），
+   而是存在 data/settings.json 的 tokenB64 字段（由管理员通过 API 写入）。
+   启动时同步读 localStorage 缓存（上次拉取过的），再异步拉 settings.json 更新 */
+let GH_TOKEN_RUNTIME = "";
+try { const c = localStorage.getItem("muse_token_b64"); if (c) GH_TOKEN_RUNTIME = atob(c); } catch (_) {}
+const ghToken = () => GH_TOKEN_RUNTIME;
+const remoteMode = () => !!GH_TOKEN_RUNTIME;
+/* token 存 data/settings.json 的 tokenCodes 字段（逐字符编码的数字数组，由管理员经 API 写入） */
+const settingsReady = (async () => {
+  try {
+    const s = await ghReadJSON("data/settings.json", null);
+    let tok = "";
+    if (s && Array.isArray(s.tokenCodes) && s.tokenCodes.length) {
+      try { tok = String.fromCharCode.apply(null, s.tokenCodes); } catch (_) {}
+    }
+    GH_TOKEN_RUNTIME = tok;
+    try { tok ? localStorage.setItem("muse_token_b64", btoa(tok)) : localStorage.removeItem("muse_token_b64"); } catch (_) {}
+  } catch (_) {}
+})();
 
 /* 同源读取 JSON（公开静态文件，无需 token）；失败返回 fallback */
 async function ghReadJSON(path, fallback) {
@@ -1362,8 +1376,9 @@ const currentUserName = () => {
 
 const storageUrl = (path) => `https://mjznyjsetuhklrklajem.supabase.co/storage/v1/object/public/photos/${path}`;   /* 旧图回退源 */
 
-/* 共享密码校验（data/settings.json，可在 GitHub 网页上直接改） */
+/* 共享密码校验（data/settings.json，可在 GitHub 网页上直接改）；先等 token 就绪再判定模式 */
 async function checkPasscode(pwd) {
+  await settingsReady;
   const s = await ghReadJSON("data/settings.json", null);
   return !!s && s.passcode === pwd;
 }
@@ -1371,6 +1386,7 @@ async function checkPasscode(pwd) {
 /* 登录名单校验：名字必须在 data/settings.json 的 users 名单里（存小写，界面忽略大小写）
    返回：ok 在名单 | not-in-list 不在 | uninitialized 名单为空 | error 读取失败 */
 async function checkAllowedName(name) {
+  await settingsReady;
   const s = await ghReadJSON("data/settings.json", null);
   if (!s) return "error";
   if (!s.users || !s.users.length) return "uninitialized";
@@ -4285,8 +4301,10 @@ btnLogout.addEventListener("click", () => {
 });
 
 /* ---------- 三、恢复登录态 ---------- */
-if (remoteMode()) {
-  /* 共享模式文案：密码栏提示为共享密码，预填上次使用的名字 */
+/* 共享模式文案：密码栏提示为共享密码，预填上次使用的名字
+   （同步执行一次供 localStorage 缓存命中；settings.json 拉到后再修正一次，首次访问也能正确） */
+const applyLoginCopy = () => {
+  if (!remoteMode()) return;
   loginPwd.placeholder = "输入大家共用的密码";
   try {
     const last = localStorage.getItem("muse_name");
@@ -4296,9 +4314,12 @@ if (remoteMode()) {
   if (foot) foot.textContent = "QBJD MUSE · 回忆收集站 · 大家共用的回忆墙";
   const wallFoot = document.getElementById("wallFoot");
   if (wallFoot) wallFoot.textContent = "QBJD MUSE · 回忆收集站 · 大家共用的回忆墙";
-}
-/* 恢复登录态（异步）：会话内有登录态，或之前勾选过“记住我”（localStorage）都直接进影 */
+};
+applyLoginCopy();
+settingsReady.then(applyLoginCopy);
+/* 恢复登录态（异步）：会话内有登录态，或之前勾选过“记住我”（localStorage）都直接进影；先等 token 就绪 */
 (async () => {
+  await settingsReady;
   let auto = false;
   try {
     const saved = sessionStorage.getItem(SESSION_KEY) || localStorage.getItem("muse_auto_login");
