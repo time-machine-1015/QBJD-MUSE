@@ -24,22 +24,24 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
 
   /* 云端缩略图（卡片用，几十 KB）：缓存优先，二次打开回忆墙秒出；
-     原图不缓存（看大图时按需加载，避免缓存撑爆） */
+     原图不缓存（看大图时按需加载，避免缓存撑爆）
+     所有缓存操作都有兜底：任何异常（如 WebView 环境不支持）直接回退网络请求，绝不挂起 */
   if (url.origin === "https://mjznyjsetuhklrklajem.supabase.co" &&
       url.pathname.includes("/storage/v1/object/public/photos/thumb_")) {
-    e.respondWith(
-      caches.match(e.request).then(
-        (hit) =>
-          hit ||
-          fetch(e.request).then((res) => {
-            if (res.ok) {
-              const copy = res.clone();
-              caches.open(CACHE).then((c) => c.put(e.request, copy));
-            }
-            return res;
-          })
-      )
-    );
+    e.respondWith((async () => {
+      try {
+        const hit = await caches.match(e.request);
+        if (hit) return hit;
+      } catch (_) { /* Cache API 不可用 → 直接走网络 */ }
+      const res = await fetch(e.request);
+      if (res && res.ok) {
+        try {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        } catch (_) {}
+      }
+      return res;
+    })().catch(() => fetch(e.request)));
     return;
   }
 

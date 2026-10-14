@@ -4250,11 +4250,27 @@ if (remoteMode()) {
   if (!auto) { loginVideo.start(); trueFocus.start(); }
 })().catch(() => { loginVideo.start(); trueFocus.start(); });
 
-/* ---------- PWA：注册 Service Worker（离线壳缓存，HTTPS/本地生效） ---------- */
-if ("serviceWorker" in navigator) {
+/* ---------- PWA：注册 Service Worker（离线壳缓存，HTTPS/本地生效）
+   App（Capacitor WebView）里不注册：WebView 的 Cache API 行为不可控，
+   会导致缩略图请求被 SW 挂起、图片一直加载不出来；App 自带系统缓存，无需 SW ---------- */
+if ("serviceWorker" in navigator && !window.Capacitor) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   });
+} else if (window.Capacitor && "serviceWorker" in navigator) {
+  /* App 环境：注销历史 SW 并清空其缓存（修复图片挂起），完成后自动刷新一次生效 */
+  navigator.serviceWorker.getRegistrations().then(async (regs) => {
+    let had = false;
+    for (const reg of regs) { had = true; await reg.unregister().catch(() => {}); }
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (_) {}
+    if (had && !sessionStorage.getItem("muse_sw_cleaned")) {
+      sessionStorage.setItem("muse_sw_cleaned", "1");
+      location.reload();
+    }
+  }).catch(() => {});
 }
 </script>
 </body>
