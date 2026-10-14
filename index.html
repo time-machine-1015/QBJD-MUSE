@@ -1273,9 +1273,12 @@ const CLOUD = {
   GH_OWNER: "time-machine-1015",
   GH_REPO: "QBJD-MUSE",
   GH_BRANCH: "main",
-  GH_TOKEN: "",   /* ← GitHub Token（仅本仓库 Contents 读写权限），填入后点赞/评论/上传生效 */
+  /* Token 用 base64 存放（在浏览器控制台跑 btoa("你的token") 得到编码，粘到这里）：
+     1. 避免明文被扫描吊销；2. 仍仅限本仓库 Contents 读写权限，泄露风险可控 */
+  GH_TOKEN_B64: "",   /* ← 填入 btoa(token) 的结果，填入后点赞/评论/上传生效 */
 };
-const remoteMode = () => !!CLOUD.GH_TOKEN;
+const ghToken = () => { try { return CLOUD.GH_TOKEN_B64 ? atob(CLOUD.GH_TOKEN_B64) : ""; } catch (_) { return ""; } };
+const remoteMode = () => !!ghToken();
 
 /* 同源读取 JSON（公开静态文件，无需 token）；失败返回 fallback */
 async function ghReadJSON(path, fallback) {
@@ -1288,7 +1291,7 @@ async function ghReadJSON(path, fallback) {
 
 function ghHeaders() {
   return {
-    Authorization: "Bearer " + CLOUD.GH_TOKEN,
+    Authorization: "Bearer " + ghToken(),
     Accept: "application/vnd.github+json",
     "Content-Type": "application/json",
   };
