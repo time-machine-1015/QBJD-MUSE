@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <!-- Supabase 浏览器 SDK（本地托管，不依赖第三方 CDN——避免国内网络访问 CDN 卡顿阻塞页面渲染） -->
-<script src="./supabase.min.js"></script>
+<!-- GitHub 数据层：无需额外 SDK，同源静态 JSON 读取 + Contents API 写入 -->
 <style>
 /* ============ 基础 ============ */
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1265,23 +1265,75 @@ const memDB = (() => {
 })();
 
 /* ============================================================
- * 云端共享模式（可选）：填好下面两项 = 大家看同一面回忆墙
- * ① SUPABASE_URL：Supabase 项目地址，如 https://xxxx.supabase.co
- * ② SUPABASE_ANON_KEY：项目 anon public key
- * 留空（默认）= 本地模式，照片只存在自己浏览器里
- * 部署步骤见同目录《部署指南》
+ * 共享模式：数据全部存在 GitHub 仓库（照片 + 记录 + 点赞 + 评论）
+ * 读取 = 同源静态 JSON（快且稳，无需 token）；写入 = GitHub Contents API（需 token）
+ * 不再依赖 Supabase（境外服务器在国内网络下时断时续）
  * ============================================================ */
 const CLOUD = {
-  SUPABASE_URL: "https://mjznyjsetuhklrklajem.supabase.co",
-  SUPABASE_ANON_KEY: "sb_publishable_47ej9YunHYR68GscimRQ0g_qJRZYfh-",
+  GH_OWNER: "time-machine-1015",
+  GH_REPO: "QBJD-MUSE",
+  GH_BRANCH: "main",
+  GH_TOKEN: "",   /* ← GitHub Token（仅本仓库 Contents 读写权限），填入后点赞/评论/上传生效 */
 };
-let cloud = null;
-try {
-  if (CLOUD.SUPABASE_URL && CLOUD.SUPABASE_ANON_KEY && window.supabase) {
-    cloud = window.supabase.createClient(CLOUD.SUPABASE_URL, CLOUD.SUPABASE_ANON_KEY);
+const remoteMode = () => !!CLOUD.GH_TOKEN;
+
+/* 同源读取 JSON（公开静态文件，无需 token）；失败返回 fallback */
+async function ghReadJSON(path, fallback) {
+  try {
+    const res = await fetch(path + "?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } catch (_) { return fallback; }
+}
+
+function ghHeaders() {
+  return {
+    Authorization: "Bearer " + CLOUD.GH_TOKEN,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+  };
+}
+
+/* UTF-8 → base64（分块避免栈溢出） */
+function ghB64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function ghB64Bytes(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/* Contents API 写文本/二进制文件；带 sha 时为更新，否则新建；自动重试 2 次 */
+async function ghPutFile(path, contentB64, message) {
+  const api = `https://api.github.com/repos/${CLOUD.GH_OWNER}/${CLOUD.GH_REPO}/contents/${path}`;
+  let lastErr = null;
+  for (let i = 0; i < 3; i++) {
+    try {
+      let sha;
+      try {
+        const meta = await fetch(api + "?ref=" + CLOUD.GH_BRANCH, { headers: ghHeaders() }).then((r) => r.json());
+        if (meta && meta.sha) sha = meta.sha;
+      } catch (_) {}
+      const res = await fetch(api, {
+        method: "PUT",
+        headers: ghHeaders(),
+        body: JSON.stringify({ message: message || ("update " + path), branch: CLOUD.GH_BRANCH, content: contentB64, ...(sha ? { sha } : {}) }),
+      });
+      if (!res.ok) throw new Error("GitHub 写入失败 (" + res.status + ")");
+      return await res.json();
+    } catch (err) {
+      lastErr = err;
+      if (i < 2) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    }
   }
-} catch (_) { cloud = null; }
-const remoteMode = () => !!cloud;
+  throw lastErr;
+}
+
+const ghWriteText = (path, obj, message) => ghPutFile(path, ghB64(JSON.stringify(obj, null, 2)), message);
 
 /* 访客标识：跟当前登录名走（换账号登录 = 换身份，点赞/评论按人隔离）
    未登录时回退设备 UUID（兼容旧数据）；账号在任何设备登录都是同一个人 */
@@ -1305,55 +1357,56 @@ const currentUserName = () => {
   try { return (sessionStorage.getItem("muse_user") || "").trim(); } catch (_) { return ""; }
 };
 
-const storageUrl = (path) => `${CLOUD.SUPABASE_URL}/storage/v1/object/public/photos/${path}`;
+const storageUrl = (path) => `https://mjznyjsetuhklrklajem.supabase.co/storage/v1/object/public/photos/${path}`;   /* 旧图回退源 */
 
-/* 共享密码校验（密码存在云端 settings 表，可在 Supabase 后台改） */
+/* 共享密码校验（data/settings.json，可在 GitHub 网页上直接改） */
 async function checkPasscode(pwd) {
-  try {
-    const { data, error } = await cloud.from("settings").select("value").eq("key", "passcode").limit(1);
-    if (error) throw error;
-    return !!data?.length && data[0].value === pwd;
-  } catch (_) { return false; }
+  const s = await ghReadJSON("data/settings.json", null);
+  return !!s && s.passcode === pwd;
 }
 
-/* 登录名单校验：名字必须在云端 allowed_users 表里（存小写，界面忽略大小写）
-   返回：ok 在名单 | not-in-list 不在 | uninitialized 表还没建 | error 查询失败 */
+/* 登录名单校验：名字必须在 data/settings.json 的 users 名单里（存小写，界面忽略大小写）
+   返回：ok 在名单 | not-in-list 不在 | uninitialized 名单为空 | error 读取失败 */
 async function checkAllowedName(name) {
-  try {
-    const { data, error } = await cloud.from("allowed_users").select("name").eq("name", name.toLowerCase()).limit(1);
-    if (error) return /PGRST205|Could not find the table|does not exist/i.test(error.message) ? "uninitialized" : "error";
-    return data && data.length ? "ok" : "not-in-list";
-  } catch (_) { return "error"; }
+  const s = await ghReadJSON("data/settings.json", null);
+  if (!s) return "error";
+  if (!s.users || !s.users.length) return "uninitialized";
+  return s.users.includes(name.toLowerCase()) ? "ok" : "not-in-list";
 }
 
-/* 云端读取：memories 全表 + 我点过的赞 + 全部评论，内存拼接 */
+/* 共享读取：memories + likes + comments 三个 JSON，内存拼接（同源读取，快且稳） */
 async function loadMemoriesRemote() {
-  const [rowsR, likesR, cmtsR] = await Promise.all([
-    cloud.from("memories").select("*").order("created_at", { ascending: false }),
-    cloud.from("memory_likes").select("memory_id").eq("visitor", currentVisitor()),
-    cloud.from("memory_comments").select("*").order("created_at", { ascending: true }),
+  const [mem, likes, comments] = await Promise.all([
+    ghReadJSON("data/memories.json", null),
+    ghReadJSON("data/likes.json", []),
+    ghReadJSON("data/comments.json", []),
   ]);
-  if (rowsR.error) throw rowsR.error;
-  const likedSet = new Set((likesR.data || []).map((r) => r.memory_id));
-  /* 评论表还没建（SQL 未跑）时 cmtsR.error 有值 → 评论区功能静默降级，不影响照片墙 */
+  if (!mem) throw new Error("数据加载失败，请检查网络");
+  const lk = Array.isArray(likes) ? likes : [];
+  const cm = Array.isArray(comments) ? comments : [];
+  const likeCount = (id) => lk.filter((l) => l.memory_id === id).length;
+  const likedSet = new Set(lk.filter((l) => l.visitor === currentVisitor()).map((l) => l.memory_id));
   const cmtsMap = new Map();
-  (cmtsR.data || []).forEach((c) => {
+  cm.forEach((c) => {
     const key = String(c.memory_id);
     if (!cmtsMap.has(key)) cmtsMap.set(key, []);
-    cmtsMap.get(key).push({ id: c.id, author: c.author || "", text: c.text || "", createdAt: +new Date(c.created_at) });
+    cmtsMap.get(key).push({ id: c.id, author: c.author || "", text: c.text || "", createdAt: c.createdAt || +new Date() });
   });
-  memories = (rowsR.data || []).map((r) => ({
+  memories = (Array.isArray(mem) ? mem : []).map((r) => ({
     id: r.id,
-    createdAt: +new Date(r.created_at),
+    createdAt: r.createdAt,
     story: r.story || "",
-    author: r.author || "",                 // 上传者（列未建时为空，兼容）
+    author: r.author || "",
     season: r.season,
-    likes: r.likes || 0,
-    liked: likedSet.has(r.id),          // 复用本地字段名，UI 无需感知模式
+    likes: likeCount(r.id), /* 计数始终从 likes.json 实时计算，与写入口径一致，避免刷新后归零 */
+    liked: likedSet.has(r.id),
     comments: cmtsMap.get(String(r.id)) || [],
     image_path: r.image_path,
-    url: storageUrl(r.image_path),
-    thumbUrl: r.thumb_path ? storageUrl(r.thumb_path) : storageUrl(r.image_path),   // 旧照片无缩略图 → 直接用原图，不发起失败请求
+    /* 图片双源：主源 = GitHub Pages（与页面同源）；回退 = Supabase 存储 */
+    url: "photos/" + r.image_path,
+    thumbUrl: r.thumb_path ? "photos/" + r.thumb_path : "photos/" + r.image_path,
+    sbUrl: storageUrl(r.image_path),
+    sbThumb: r.thumb_path ? storageUrl(r.thumb_path) : storageUrl(r.image_path),
     w: r.w, h: r.h,
   }));
 }
@@ -1381,98 +1434,95 @@ function compressImage(file, maxSide = 1600, quality = 0.82) {
   });
 }
 
-/* 云端新增：压缩两版（原图 1600 + 缩略 480）→ 传存储桶 → 插表（插表失败自动回收图片） */
+/* 共享新增：压缩两版 → GitHub Contents API 传图片 → 写 memories.json */
 async function addMemoryRemote(file) {
   const [blob, thumbBlob] = await Promise.all([
     compressImage(file, 1600, 0.82),
-    compressImage(file, 480, 0.72),            // 缩略图：回忆墙卡片用，几十 KB/张，秒开
+    compressImage(file, 480, 0.72),
   ]);
   const dim = await imageSize(blob);
   const ext = (blob.type && blob.type.split("/")[1]) || "jpg";
   const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const [up, upT] = await Promise.all([
-    cloud.storage.from("photos").upload(path, blob, { contentType: blob.type || "image/jpeg", upsert: false }),
-    cloud.storage.from("photos").upload(`thumb_${path}`, thumbBlob, { contentType: thumbBlob.type || "image/jpeg", upsert: false }),
-  ]);
-  if (up.error || upT.error) {
-    const toRemove = [];
-    if (!up.error) toRemove.push(path);
-    if (!upT.error) toRemove.push(`thumb_${path}`);
-    if (toRemove.length) cloud.storage.from("photos").remove(toRemove).catch(() => {});
-    throw up.error || upT.error;
-  }
-  const ins0 = await cloud.from("memories").insert({
-    story: "", season: seasonIdx, likes: 0,
-    image_path: path, thumb_path: `thumb_${path}`, w: dim.w, h: dim.h,
-    author: currentUserName(),              // 上传者署名
-  }).select().single();
-  /* 兼容：author/thumb_path 列还没建（SQL 未跑）时重试不带署名，保证上传不被卡住 */
-  let ins = ins0;
-  if (ins.error && /PGRST204|column|not exist/i.test(ins.error.message || "")) {
-    ins = await cloud.from("memories").insert({
-      story: "", season: seasonIdx, likes: 0,
-      image_path: path, w: dim.w, h: dim.h,
-    }).select().single();
-  }
-  if (ins.error) {
-    cloud.storage.from("photos").remove([path]).catch(() => {});
-    throw ins.error;
-  }
-  return ins.data;
+  await ghPutFile("photos/" + path, ghB64Bytes(new Uint8Array(await blob.arrayBuffer())), "photo " + path);
+  await ghPutFile("photos/thumb_" + path, ghB64Bytes(new Uint8Array(await thumbBlob.arrayBuffer())), "thumb " + path);
+  const row = {
+    id: path,
+    createdAt: Date.now(),
+    story: "",
+    author: currentUserName(),
+    season: seasonIdx,
+    likes: 0,
+    image_path: path,
+    thumb_path: "thumb_" + path,
+    w: dim.w, h: dim.h,
+  };
+  const mem = await ghReadJSON("data/memories.json", []);
+  await ghWriteText("data/memories.json", [row, ...(Array.isArray(mem) ? mem : [])], "add memory " + path);
+  return row;
 }
 
-/* 云端点赞：访客点赞表增删 + 原子计数 RPC；网络抖动自动重试 3 次（间隔递增） */
+/* 共享点赞：写 data/likes.json（幂等，重复操作直接成功）；网络抖动自动重试 3 次 */
 async function toggleLikeRemote(m, nextLiked) {
   const doOp = async () => {
-    const op = nextLiked
-      ? cloud.from("memory_likes").insert({ memory_id: m.id, visitor: currentVisitor() })
-      : cloud.from("memory_likes").delete().eq("memory_id", m.id).eq("visitor", currentVisitor());
-    const r = await op;
-    if (r.error) {
-      /* 主键冲突 23505 = 云端其实已点过赞（界面状态与云端错位）→ 不报失败，拉取真实状态对齐 */
-      if (nextLiked && String(r.error.code) === "23505") {
-        await loadMemories();
-        renderGrid();
-        return;
-      }
-      throw r.error;
-    }
-    const b = await cloud.rpc("bump_likes", { m_id: m.id, delta: nextLiked ? 1 : -1 });
-    if (b.error) throw b.error;
+    const likes = await ghReadJSON("data/likes.json", []);
+    const lk = Array.isArray(likes) ? likes : [];
+    const visitor = currentVisitor();
+    const has = lk.some((l) => l.memory_id === m.id && l.visitor === visitor);
+    if (nextLiked && has) return;              // 已点过 → 幂等成功
+    if (!nextLiked && !has) return;            // 未点过要取消 → 幂等成功
+    const next = nextLiked ? [...lk, { memory_id: m.id, visitor }] : lk.filter((l) => !(l.memory_id === m.id && l.visitor === visitor));
+    await ghWriteText("data/likes.json", next, "like " + m.id);
   };
   let lastErr = null;
   for (let i = 0; i < 3; i++) {
     try { await doOp(); return; }
     catch (err) {
       lastErr = err;
-      if (i < 2) await new Promise((r) => setTimeout(r, 1200 * (i + 1)));   // 1.2s / 2.4s 后重试
+      if (i < 2) await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
     }
   }
   throw lastErr;
 }
 
-/* 云端删除：删行（点赞/评论级联）→ 删存储图片（原图 + 缩略图） */
+/* 共享删除：从 memories.json 移除记录，并顺带清理 likes/comments 里的关联数据（照片文件保留在仓库里，不影响页面） */
 async function deleteMemoryRemote(id) {
-  const m = memories.find((x) => x.id === id);
-  const r = await cloud.from("memories").delete().eq("id", id);
-  if (r.error) throw r.error;
-  if (m?.image_path) cloud.storage.from("photos").remove([m.image_path, "thumb_" + m.image_path]).catch(() => {});
+  const mem = await ghReadJSON("data/memories.json", []);
+  const list = Array.isArray(mem) ? mem : [];
+  if (!list.some((x) => x.id === id)) return;
+  await ghWriteText("data/memories.json", list.filter((x) => x.id !== id), "delete memory " + id);
+  try {
+    const likes = await ghReadJSON("data/likes.json", []);
+    const lk = Array.isArray(likes) ? likes.filter((l) => l.memory_id !== id) : [];
+    if (!Array.isArray(likes) || lk.length !== likes.length) await ghWriteText("data/likes.json", lk, "clean likes " + id);
+  } catch (e) { console.warn("清理点赞残留失败（不影响删除）", e); }
+  try {
+    const comments = await ghReadJSON("data/comments.json", []);
+    const cm = Array.isArray(comments) ? comments.filter((c) => c.memory_id !== id) : [];
+    if (!Array.isArray(comments) || cm.length !== comments.length) await ghWriteText("data/comments.json", cm, "clean comments " + id);
+  } catch (e) { console.warn("清理评论残留失败（不影响删除）", e); }
 }
 
-/* 云端评论：发表（署名当前登录人） */
+/* 共享评论：追加到 data/comments.json（署名当前登录人） */
 async function addCommentRemote(memoryId, text) {
-  const ins = await cloud.from("memory_comments")
-    .insert({ memory_id: memoryId, author: currentUserName(), text })
-    .select().single();
-  if (ins.error) throw ins.error;
-  return ins.data;
+  const comments = await ghReadJSON("data/comments.json", []);
+  const cm = Array.isArray(comments) ? comments : [];
+  const row = {
+    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2),
+    memory_id: memoryId,
+    author: currentUserName(),
+    text,
+    createdAt: Date.now(),
+  };
+  await ghWriteText("data/comments.json", [...cm, row], "comment on " + memoryId);
+  return row;
 }
 
-/* 云端评论：删除（仅本人的评论可删） */
+/* 共享评论：删除（仅本人的评论可删） */
 async function deleteCommentRemote(commentId) {
-  const r = await cloud.from("memory_comments")
-    .delete().eq("id", commentId).eq("author", currentUserName());
-  if (r.error) throw r.error;
+  const comments = await ghReadJSON("data/comments.json", []);
+  const cm = Array.isArray(comments) ? comments : [];
+  const me = currentUserName();
+  await ghWriteText("data/comments.json", cm.filter((c) => !(String(c.id) === String(commentId) && c.author === me)), "delete comment " + commentId);
 }
 
 /* 故事行数 = 评论数（一行一句回忆，对应粒子查看器逐行浮现） */
@@ -1536,7 +1586,7 @@ function renderGrid() {
     const preview = storyPreview(m.story);
     card.setAttribute("aria-label", `${preview || "还没写下故事"} · ${fmtDate(m.createdAt)}`);
     card.innerHTML = `
-      <div class="mem-thumb"><img src="${m.thumbUrl || m.url}" alt="回忆照片" loading="lazy" onerror="this.onerror=null;this.src='${m.url}'"></div>
+      <div class="mem-thumb"><img src="${m.thumbUrl}" alt="回忆照片" loading="lazy" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='${m.sbThumb}';}else{this.onerror=null;this.src='${m.sbUrl}';}"></div>
       <figcaption>
         <div class="mem-actions"></div>
       </figcaption>
@@ -2342,6 +2392,7 @@ const photoViewer = (() => {
     current = m;
     resetCard();
     buildBack(m);
+    img.onerror = () => { img.onerror = null; if (m.sbUrl) img.src = m.sbUrl; };   // GitHub 源失败自动回退 Supabase
     img.src = m.url;
     V.hidden = false;
     document.body.classList.add("lock-scroll");
@@ -2608,8 +2659,12 @@ const memoViewer = (() => {
 
   function startParticles(m) {
     const img = new Image();
-    img.crossOrigin = "anonymous";   // 云端图片采样需要（Supabase 放开 CORS；blob 地址不受影响）
+    img.crossOrigin = "anonymous";   // 云端图片采样需要（GitHub Pages 同源/Supabase 放开 CORS）
     img.onload = () => { if (openId === m.id) setup(img); };
+    img.onerror = () => {                       // GitHub 源失败自动回退 Supabase
+      img.onerror = null;
+      if (m.sbUrl && img.src !== m.sbUrl) { img.src = m.sbUrl; return; }
+    };
     img.src = m.url;
   }
 
