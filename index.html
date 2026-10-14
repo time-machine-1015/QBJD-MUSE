@@ -1353,6 +1353,7 @@ async function loadMemoriesRemote() {
     comments: cmtsMap.get(String(r.id)) || [],
     image_path: r.image_path,
     url: storageUrl(r.image_path),
+    thumbUrl: r.thumb_path ? storageUrl(r.thumb_path) : storageUrl(r.image_path),   // 旧照片无缩略图 → 直接用原图，不发起失败请求
     w: r.w, h: r.h,
   }));
 }
@@ -1380,22 +1381,32 @@ function compressImage(file, maxSide = 1600, quality = 0.82) {
   });
 }
 
-/* 云端新增：压缩 → 传存储桶 → 插表（插表失败自动回收图片） */
+/* 云端新增：压缩两版（原图 1600 + 缩略 480）→ 传存储桶 → 插表（插表失败自动回收图片） */
 async function addMemoryRemote(file) {
-  const blob = await compressImage(file);
+  const [blob, thumbBlob] = await Promise.all([
+    compressImage(file, 1600, 0.82),
+    compressImage(file, 480, 0.72),            // 缩略图：回忆墙卡片用，几十 KB/张，秒开
+  ]);
   const dim = await imageSize(blob);
   const ext = (blob.type && blob.type.split("/")[1]) || "jpg";
   const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const up = await cloud.storage.from("photos").upload(path, blob, {
-    contentType: blob.type || "image/jpeg", upsert: false,
-  });
-  if (up.error) throw up.error;
+  const [up, upT] = await Promise.all([
+    cloud.storage.from("photos").upload(path, blob, { contentType: blob.type || "image/jpeg", upsert: false }),
+    cloud.storage.from("photos").upload(`thumb_${path}`, thumbBlob, { contentType: thumbBlob.type || "image/jpeg", upsert: false }),
+  ]);
+  if (up.error || upT.error) {
+    const toRemove = [];
+    if (!up.error) toRemove.push(path);
+    if (!upT.error) toRemove.push(`thumb_${path}`);
+    if (toRemove.length) cloud.storage.from("photos").remove(toRemove).catch(() => {});
+    throw up.error || upT.error;
+  }
   const ins0 = await cloud.from("memories").insert({
     story: "", season: seasonIdx, likes: 0,
-    image_path: path, w: dim.w, h: dim.h,
+    image_path: path, thumb_path: `thumb_${path}`, w: dim.w, h: dim.h,
     author: currentUserName(),              // 上传者署名
   }).select().single();
-  /* 兼容：author 列还没建（SQL 未跑）时重试不带署名，保证上传不被卡住 */
+  /* 兼容：author/thumb_path 列还没建（SQL 未跑）时重试不带署名，保证上传不被卡住 */
   let ins = ins0;
   if (ins.error && /PGRST204|column|not exist/i.test(ins.error.message || "")) {
     ins = await cloud.from("memories").insert({
@@ -1410,23 +1421,42 @@ async function addMemoryRemote(file) {
   return ins.data;
 }
 
-/* 云端点赞：访客点赞表增删 + 原子计数 RPC（失败抛出，调用方负责回滚提示） */
+/* 云端点赞：访客点赞表增删 + 原子计数 RPC；网络抖动自动重试 3 次（间隔递增） */
 async function toggleLikeRemote(m, nextLiked) {
-  const op = nextLiked
-    ? cloud.from("memory_likes").insert({ memory_id: m.id, visitor: currentVisitor() })
-    : cloud.from("memory_likes").delete().eq("memory_id", m.id).eq("visitor", currentVisitor());
-  const r = await op;
-  if (r.error) throw r.error;
-  const b = await cloud.rpc("bump_likes", { m_id: m.id, delta: nextLiked ? 1 : -1 });
-  if (b.error) throw b.error;
+  const doOp = async () => {
+    const op = nextLiked
+      ? cloud.from("memory_likes").insert({ memory_id: m.id, visitor: currentVisitor() })
+      : cloud.from("memory_likes").delete().eq("memory_id", m.id).eq("visitor", currentVisitor());
+    const r = await op;
+    if (r.error) {
+      /* 主键冲突 23505 = 云端其实已点过赞（界面状态与云端错位）→ 不报失败，拉取真实状态对齐 */
+      if (nextLiked && String(r.error.code) === "23505") {
+        await loadMemories();
+        renderGrid();
+        return;
+      }
+      throw r.error;
+    }
+    const b = await cloud.rpc("bump_likes", { m_id: m.id, delta: nextLiked ? 1 : -1 });
+    if (b.error) throw b.error;
+  };
+  let lastErr = null;
+  for (let i = 0; i < 3; i++) {
+    try { await doOp(); return; }
+    catch (err) {
+      lastErr = err;
+      if (i < 2) await new Promise((r) => setTimeout(r, 1200 * (i + 1)));   // 1.2s / 2.4s 后重试
+    }
+  }
+  throw lastErr;
 }
 
-/* 云端删除：删行（点赞/评论级联）→ 删存储图片 */
+/* 云端删除：删行（点赞/评论级联）→ 删存储图片（原图 + 缩略图） */
 async function deleteMemoryRemote(id) {
   const m = memories.find((x) => x.id === id);
   const r = await cloud.from("memories").delete().eq("id", id);
   if (r.error) throw r.error;
-  if (m?.image_path) cloud.storage.from("photos").remove([m.image_path]).catch(() => {});
+  if (m?.image_path) cloud.storage.from("photos").remove([m.image_path, "thumb_" + m.image_path]).catch(() => {});
 }
 
 /* 云端评论：发表（署名当前登录人） */
@@ -1506,7 +1536,7 @@ function renderGrid() {
     const preview = storyPreview(m.story);
     card.setAttribute("aria-label", `${preview || "还没写下故事"} · ${fmtDate(m.createdAt)}`);
     card.innerHTML = `
-      <div class="mem-thumb"><img src="${m.url}" alt="回忆照片"></div>
+      <div class="mem-thumb"><img src="${m.thumbUrl || m.url}" alt="回忆照片" loading="lazy" onerror="this.onerror=null;this.src='${m.url}'"></div>
       <figcaption>
         <div class="mem-actions"></div>
       </figcaption>
@@ -4199,21 +4229,26 @@ if (remoteMode()) {
   const wallFoot = document.getElementById("wallFoot");
   if (wallFoot) wallFoot.textContent = "QBJD MUSE · 回忆收集站 · 大家共用的回忆墙";
 }
-try {
-  /* 自动登录：会话内有登录态，或之前勾选过“记住我”（localStorage）都直接进影 */
-  const saved = sessionStorage.getItem(SESSION_KEY) || localStorage.getItem("muse_auto_login");
-  if (saved) {
-    if (!sessionStorage.getItem(SESSION_KEY)) {
-      try { sessionStorage.setItem(SESSION_KEY, saved); } catch (_) {}
+/* 恢复登录态（异步）：会话内有登录态，或之前勾选过“记住我”（localStorage）都直接进影 */
+(async () => {
+  let auto = false;
+  try {
+    const saved = sessionStorage.getItem(SESSION_KEY) || localStorage.getItem("muse_auto_login");
+    if (saved) {
+      if (!sessionStorage.getItem(SESSION_KEY)) {
+        try { sessionStorage.setItem(SESSION_KEY, saved); } catch (_) {}
+      }
+      auto = true;
+      loginLayer.classList.add("hidden");
+      enterPlayer(saved);
+      /* 关键：按当前登录账号重新拉取点赞/评论状态（首次加载是按访客身份拉的，
+         不刷新会导致点赞状态错乱 → 重复点赞主键冲突 → “同步失败”） */
+      try { await loadMemories(); } catch (_) { memories = []; }
+      renderGrid();
     }
-    loginLayer.classList.add("hidden");
-    enterPlayer(saved);
-  }
-  else { loginVideo.start(); trueFocus.start(); }
-} catch (_) {
-  loginVideo.start();
-  trueFocus.start();
-}
+  } catch (_) {}
+  if (!auto) { loginVideo.start(); trueFocus.start(); }
+})().catch(() => { loginVideo.start(); trueFocus.start(); });
 
 /* ---------- PWA：注册 Service Worker（离线壳缓存，HTTPS/本地生效） ---------- */
 if ("serviceWorker" in navigator) {
