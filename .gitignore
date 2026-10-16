@@ -1,0 +1,12 @@
+# 本地备份（不要提交，也不要上传到 GitHub）
+.backups/
+
+# 依赖与临时文件
+node_modules/
+*.log
+Thumbs.db
+.DS_Store
+
+# 本地环境变量（token 等敏感信息只放服务端）
+.env
+.env.*
