@@ -109,6 +109,23 @@ let cid = "";
   const r3 = await call("/api/comment-like", { photoId, commentId: cid, add: true }, tokens["chenjianhao"]);
   check("点赞评论成功", r3.body.ok === true && r3.body.event.type === "like_comment", r3.body);
   check("评论作者收到 like_comment 通知", mock.json("inbox/tanglinshu.json")[0].type === "like_comment");
+
+  const delOther = await call("/api/comment-delete", { photoId, commentId: cid }, tokens["yangzelin"]);
+  check("不能删别人的评论", delOther.status === 403, delOther.body);
+  const delOwn = await call("/api/comment-delete", { photoId, commentId: cid }, tokens["tanglinshu"]);
+  check("可以删自己的评论，评论数同步", delOwn.body.ok === true && mock.json("state/wall.json").memories[0].commentCount === 1, delOwn.body);
+}
+
+console.log("\n[4b] 老照片认领（作者为空时才能认领，有主就锁死）");
+{
+  const wall = mock.json("state/wall.json");
+  wall.memories.push({ id: "legacy-1.jpeg", createdAt: 1, author: "", story: "", season: 0, likes: [], commentCount: 0, w: 1, h: 1, image: "photos/legacy-1.jpeg", thumb: "photos/thumb_legacy-1.jpeg" });
+  mock.commitPath("state/wall.json", JSON.stringify(wall), "import legacy photo");
+
+  const c1 = await call("/api/claim", { photoId: "legacy-1.jpeg" }, tokens["yangzelin"]);
+  check("无主的老照片可以被认领", c1.body.ok === true && mock.json("state/wall.json").memories.find((m) => m.id === "legacy-1.jpeg").author === "yangzelin", c1.body);
+  const c2 = await call("/api/claim", { photoId: "legacy-1.jpeg" }, tokens["tanglinshu"]);
+  check("已有主人的照片不能被抢走", c2.body.noop === true && mock.json("state/wall.json").memories.find((m) => m.id === "legacy-1.jpeg").author === "yangzelin", c2.body);
 }
 
 console.log("\n[5] 并发保护（旧版最致命的 bug）：别人抢先提交时不能覆盖");
@@ -133,7 +150,10 @@ console.log("\n[6] 故事修改权限 + 删除回忆");
   const cToo = await call("/api/comment", { photoId, text: "x" }, tokens["yangzelin"]);
   check("评论接口仍可用（为删除测试准备）", cToo.body.ok === true);
   const del = await call("/api/delete", { photoId }, tokens["chenjianhao"]);
-  check("作者可以删除回忆", del.body.ok === true && mock.json("state/wall.json").memories.length === 0, del.body);
+  check("作者可以删除回忆（该条从墙上消失，其它记录保留）",
+    del.body.ok === true &&
+    !mock.json("state/wall.json").memories.some((m) => m.id === photoId) &&
+    mock.json("state/wall.json").memories.length === 1, del.body);
   check("关联评论文件被清理", mock.read("comments/" + photoId + ".json") === undefined);
   check("照片文件被清理", mock.read("photos/" + photoId) === undefined && mock.read("photos/thumb_" + photoId) === undefined);
 

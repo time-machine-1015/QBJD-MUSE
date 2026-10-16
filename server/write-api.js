@@ -352,6 +352,39 @@ async function opDelete(cfg, env, actor, p) {
   return { wall, version: at, event: null };
 }
 
+/* 删除自己写的评论 */
+async function opCommentDelete(cfg, env, actor, p) {
+  const list = await loadComments(cfg, p.photoId);
+  const row = list.find((c) => c.id === p.commentId);
+  if (!row) throw new HttpError(404, "评论不存在");
+  if (String(row.author).toLowerCase() !== actor.toLowerCase()) throw new HttpError(403, "只能删自己的评论");
+  const at = Date.now();
+  const next = list.filter((c) => c.id !== p.commentId);
+  const wall = await loadWall(cfg);
+  const m = wall.memories.find((x) => x.id === p.photoId);
+  if (m) m.commentCount = next.length;
+  await commitFiles(cfg, [
+    { path: "comments/" + p.photoId + ".json", text: JSON.stringify(next, null, 2) },
+    wallFile(wall, at),
+    versionFile(at),
+  ], `delete comment ${p.commentId} by ${actor}`);
+  return { comments: next, wall, version: at, event: null };
+}
+
+/* 认领老照片：只在作者为空时生效（防止抢别人的作品） */
+async function opClaim(cfg, env, actor, p) {
+  const wall = await loadWall(cfg);
+  const m = wall.memories.find((x) => x.id === p.photoId);
+  if (!m) throw new HttpError(404, "照片不存在");
+  if (m.author) {
+    return { wall, version: wall.v || 0, noop: true, message: "这张已经有主人了" };
+  }
+  const at = Date.now();
+  m.author = actor;
+  await commitFiles(cfg, [wallFile(wall, at), versionFile(at)], `claim ${m.id} by ${actor}`);
+  return { wall, version: at, event: null };
+}
+
 /* ---------- 会话 ---------- */
 async function issueToken(cfg, user) {
   const payload = JSON.stringify({ u: user, exp: Date.now() + 60 * 24 * 3600 * 1000 });
@@ -427,6 +460,8 @@ export async function handle(request, env) {
         else if (route === "/api/upload") result = await opUpload(cfg, env, actor, p);
         else if (route === "/api/story") result = await opStory(cfg, env, actor, p);
         else if (route === "/api/delete") result = await opDelete(cfg, env, actor, p);
+        else if (route === "/api/comment-delete") result = await opCommentDelete(cfg, env, actor, p);
+        else if (route === "/api/claim") result = await opClaim(cfg, env, actor, p);
         else if (route === "/api/comments") { result = { comments: await loadComments(cfg, p.photoId) }; }
         else if (route === "/api/wall") { result = { wall: await loadWall(cfg) }; }
         else return json({ ok: false, error: "unknown-route" }, 404);

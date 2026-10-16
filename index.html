@@ -1208,6 +1208,7 @@ body.lock-scroll { overflow: hidden; }
 
 <div class="toast" id="toast"></div>
 
+<script src="./cloud.js"></script>
 <script>
 /* ============================================================
  * 回忆收集站（登录后主界面）
@@ -1281,18 +1282,12 @@ let GH_TOKEN_RUNTIME = "";
 try { const c = localStorage.getItem("muse_token_b64"); if (c) GH_TOKEN_RUNTIME = atob(c); } catch (_) {}
 const ghToken = () => GH_TOKEN_RUNTIME;
 const remoteMode = () => !!GH_TOKEN_RUNTIME;
-/* token 存 data/settings.json 的 tokenCodes 字段（逐字符编码的数字数组，由管理员经 API 写入） */
-const settingsReady = (async () => {
-  try {
-    const s = await ghReadJSON("data/settings.json", null);
-    let tok = "";
-    if (s && Array.isArray(s.tokenCodes) && s.tokenCodes.length) {
-      try { tok = String.fromCharCode.apply(null, s.tokenCodes); } catch (_) {}
-    }
-    GH_TOKEN_RUNTIME = tok;
-    try { tok ? localStorage.setItem("muse_token_b64", btoa(tok)) : localStorage.removeItem("muse_token_b64"); } catch (_) {}
-  } catch (_) {}
-})();
+/* 新版：登录态与令牌由 cloud.js 管理（令牌只存在本机、由服务端校验），
+   不再从公开的 data/settings.json 读任何东西。
+   旧版把 GitHub 写权限 token 塞在那个文件里（字符码数组）——我一条命令就还原出来了，
+   等于把仓库钥匙挂在网上，所以这里连它在本机的缓存一起清掉。 */
+try { localStorage.removeItem("muse_token_b64"); } catch (_) {}
+const settingsReady = Promise.resolve();
 
 /* 同源读取 JSON（公开静态文件，无需 token）；失败返回 fallback */
 async function ghReadJSON(path, fallback) {
@@ -1556,6 +1551,44 @@ async function deleteCommentRemote(commentId) {
   await ghWriteText("data/comments.json", cm.filter((c) => !(String(c.id) === String(commentId) && c.author === me)), "delete comment " + commentId);
 }
 
+/* ============================================================
+ * 七、新云端数据层（对 cloud.js 的适配）
+ * 读 = 数据仓库的 GitHub Pages（免 token、不限次数）
+ * 写 = 我们的云函数（唯一写者；每次操作一个提交；别人抢先提交就整段重做）
+ * 上面那套"前端拿 token 直写 GitHub Contents"的老方案已停用：
+ * 它既会互相覆盖数据，又把仓库写权限暴露在网页里。
+ * ============================================================ */
+const cloudConfigured = () => !!(window.MuseCloud && MuseCloud.configured());
+
+async function cloudLoadWall() {
+  memories = await MuseCloud.loadWall();
+  return memories;
+}
+async function cloudLoadComments(photoId) {
+  const list = await MuseCloud.loadComments(photoId);
+  const m = memories.find((x) => x.id === photoId);
+  if (m) m.comments = list;
+  return list;
+}
+const cloudSetLike = (m, nextLiked) => MuseCloud.setLike(m.id, nextLiked);
+async function cloudAddComment(memoryId, text) {
+  const r = await MuseCloud.addComment(memoryId, text);
+  return r.comment || r;
+}
+const cloudDeleteComment = (photoId, commentId) => MuseCloud.deleteComment(photoId, commentId);
+const cloudSaveStory = (id, story) => MuseCloud.saveStory(id, story);
+const cloudDelete = (id) => MuseCloud.deleteMemory(id);
+async function cloudClaim(id) {
+  const r = await MuseCloud.claim(id);
+  if (r && r.noop) toast(r.message || "这张已经有主人了");
+  return r;
+}
+async function cloudUpload(file) {
+  const r = await MuseCloud.uploadPhoto(file, { season: seasonIdx });
+  if (r && r.queued) toast("网络不稳，这张已排队，联网后自动补传 ✦");
+  return r;
+}
+
 /* 故事行数 = 评论数（一行一句回忆，对应粒子查看器逐行浮现） */
 const storyLines = (story) => (story || "").split(/\n+/).map((s) => s.trim()).filter(Boolean).length;
 
@@ -1581,7 +1614,15 @@ function fmtDate(ts) {
 }
 
 async function loadMemories() {
-  if (remoteMode()) return loadMemoriesRemote();
+  if (cloudConfigured()) return cloudLoadWall();
+  /* 过渡期只读兜底：云端地址还没填时，继续读旧站的静态 JSON，
+     至少照片和故事照常显示（只能看、不能改），不会出现"回忆墙空了"的吓人画面 */
+  if (/^https?:/.test(location.protocol) && !/^file:/.test(location.protocol)) {
+    try {
+      const list = await loadMemoriesRemote();
+      if (list) return list;
+    } catch (_) { /* 读不到就走本机模式 */ }
+  }
   const recs = await memDB.all();
   for (const m of memories) { if (m.url && m.url.startsWith("blob:")) URL.revokeObjectURL(m.url); }
   recs.sort((a, b) => b.createdAt - a.createdAt);
@@ -1631,8 +1672,8 @@ function renderGrid() {
       onToggle: async (liked, likes) => {
         const prev = { liked: m.liked, likes: m.likes };
         m.liked = liked; m.likes = likes;
-        if (remoteMode()) {
-          try { await toggleLikeRemote(m, liked); }
+        if (cloudConfigured()) {
+          try { await cloudSetLike(m, liked); }
           catch (_) {
             m.liked = prev.liked; m.likes = prev.likes;   // 失败回滚
             toast("点赞同步失败，请检查网络");
@@ -2263,8 +2304,8 @@ async function handleFiles(e) {
   for (const file of files) {
     if (!file.type.startsWith("image/")) continue;
     try {
-      if (remoteMode()) {
-        await addMemoryRemote(file);          // 云端：压缩后传共享库
+      if (cloudConfigured()) {
+        await cloudUpload(file);              // 云端：压缩后走云函数上传
       } else {
         const dim = await imageSize(file);
         await memDB.put({
@@ -2759,7 +2800,7 @@ $("btnConfirmDel").addEventListener("click", async () => {
   const m = memories.find((x) => x.id === id);
   if (!m) return;
   try {
-    if (remoteMode()) await deleteMemoryRemote(id);
+    if (cloudConfigured()) await cloudDelete(id);
     else await memDB.del(id);
     await loadMemories();
     renderGrid();
@@ -2792,8 +2833,8 @@ $("btnStorySave").addEventListener("click", async () => {
   if (!m) { hideStoryModal(); return; }
   m.story = $("storyText").value.trim();
   try {
-    if (remoteMode()) {
-      await saveStoryRemote(id, m.story);
+    if (cloudConfigured()) {
+      await cloudSaveStory(id, m.story);
     } else {
       await memDB.put(m);
     }
@@ -2820,7 +2861,14 @@ function showCommentsModal(id) {
   const modal = $("commentsModal");
   modal.dataset.id = id;
   $("cmtMeta").textContent = `${fmtDate(m.createdAt)} 上传${m.author ? " · " + m.author : ""}`;
-  renderCommentsList(m);
+  if (cloudConfigured() && !m.commentsLoaded) {
+    $("cmtList").innerHTML = `<div class="cmt-empty">正在加载评论…</div>`;
+    cloudLoadComments(id)
+      .then((list) => { m.commentsLoaded = true; m.comments = list; renderCommentsList(m); })
+      .catch(() => renderCommentsList(m));
+  } else {
+    renderCommentsList(m);
+  }
   $("cmtText").value = "";
   modal.hidden = false;
   requestAnimationFrame(() => modal.classList.add("show"));
@@ -2856,9 +2904,9 @@ function renderCommentsList(m) {
       const m2 = memories.find((x) => x.id === $("commentsModal").dataset.id);
       if (!m2) return;
       try {
-        if (remoteMode()) await deleteCommentRemote(cid);
+        if (cloudConfigured()) await cloudDeleteComment(m2.id, cid);
         m2.comments = (m2.comments || []).filter((c) => String(c.id) !== String(cid));
-        if (!remoteMode()) await memDB.put(m2);
+        if (!cloudConfigured()) await memDB.put(m2);
         renderCommentsList(m2);
         renderGrid();
       } catch (_) { toast("删除失败，请重试"); }
@@ -2879,9 +2927,9 @@ $("btnCmtSend").addEventListener("click", async () => {  const id = $("commentsM
   const btn = $("btnCmtSend");
   btn.disabled = true;
   try {
-    if (remoteMode()) {
-      const row = await addCommentRemote(m.id, text);
-      m.comments = [...(m.comments || []), { id: row.id, author: row.author, text: row.text, createdAt: row.createdAt }];
+    if (cloudConfigured()) {
+      const row = await cloudAddComment(m.id, text);
+      m.comments = [...(m.comments || []), { id: row.id, author: row.author, text: row.text, createdAt: row.createdAt, likes: row.likes || [], replyTo: row.replyTo || null }];
     } else {
       m.comments = [...(m.comments || []), {
         id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
@@ -2910,7 +2958,7 @@ document.addEventListener("keydown", (e) => {
 
 /* ---------- 五、初始化 ---------- */
 (async () => {
-  if (remoteMode()) {
+  if (cloudConfigured()) {
     /* 共享模式：云端拉取；失败提示网络问题，不阻塞登录 */
     try { await loadMemories(); } catch (_) { memories = []; toast("云端读取失败，请检查网络后刷新"); }
     renderGrid();
@@ -4230,45 +4278,40 @@ function enterPlayer(name) {
 
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const name = loginName.value.trim();
+  let name = loginName.value.trim();
   const pwd = loginPwd.value;
   let ok = true;
   if (!name) { fieldUser.classList.add("error"); ok = false; } else fieldUser.classList.remove("error");
   if (!pwd)  { fieldPwd.classList.add("error");  ok = false; } else fieldPwd.classList.remove("error");
   if (!ok) return;
 
-  /* 云端共享模式：① 名字必须在共享名单里 ② 共享密码正确 */
-  if (remoteMode()) {
+  /* 云端模式：名单与密码都由服务端校验（公开仓库里再也读不到密码） */
+  if (cloudConfigured()) {
     const btn = loginForm.querySelector(".login-btn");
     btn.disabled = true;
-    const nameState = await checkAllowedName(name);
-    if (nameState !== "ok") {
-      btn.disabled = false;
-      if (nameState === "uninitialized") {
-        toast("共享名单还没初始化，请先在 Supabase 运行名单 SQL");
-      } else if (nameState === "error") {
-        toast("名单查询失败，请检查网络后重试");
-      } else {
+    try {
+      name = await MuseCloud.login(name, pwd);
+    } catch (err) {
+      const msg = String((err && err.message) || "");
+      if (msg === "not-in-list") {
         fieldUser.classList.add("error");
-        const msg = fieldUser.querySelector(".err-msg");
-        const origin = msg.textContent;
-        msg.textContent = "这个名字不在共享名单里";
-        setTimeout(() => { msg.textContent = origin; }, 2600);
-        toast("名字不在共享名单里");
+        const em = fieldUser.querySelector(".err-msg");
+        const origin = em.textContent;
+        em.textContent = "这个名字不在名单里";
+        setTimeout(() => { em.textContent = origin; }, 2600);
+        toast("名字不在名单里");
+      } else if (msg === "bad-passcode") {
+        fieldPwd.classList.add("error");
+        const em = fieldPwd.querySelector(".err-msg");
+        const origin = em.textContent;
+        em.textContent = "共享密码不对，再试试";
+        setTimeout(() => { em.textContent = origin; }, 2600);
+        toast("密码不对，再试试");
+      } else {
+        toast("登录失败，请检查网络后重试");
       }
       return;
-    }
-    const passed = await checkPasscode(pwd);
-    btn.disabled = false;
-    if (!passed) {
-      fieldPwd.classList.add("error");
-      const msg = fieldPwd.querySelector(".err-msg");
-      const origin = msg.textContent;
-      msg.textContent = "共享密码不对，再试试";
-      setTimeout(() => { msg.textContent = origin; }, 2600);
-      toast("密码不对，再试试");
-      return;
-    }
+    } finally { btn.disabled = false; }
   }
 
   try { sessionStorage.setItem(SESSION_KEY, name); } catch (_) {}
@@ -4279,6 +4322,11 @@ loginForm.addEventListener("submit", async (e) => {
   /* 换账号后按新身份重新拉取：点赞状态/评论权限按登录名隔离 */
   try { await loadMemories(); } catch (_) {}
   renderGrid();
+  /* 上次离线时排队的照片，登录后自动补传 */
+  try {
+    const n = await MuseCloud.flushQueue();
+    if (n) { toast(`已补传 ${n} 张排队的照片 ✦`); try { await loadMemories(); renderGrid(); } catch (_) {} }
+  } catch (_) {}
 });
 
 /* 输入即时清除错误提示 */
@@ -4304,7 +4352,7 @@ btnLogout.addEventListener("click", () => {
 /* 共享模式文案：密码栏提示为共享密码，预填上次使用的名字
    （同步执行一次供 localStorage 缓存命中；settings.json 拉到后再修正一次，首次访问也能正确） */
 const applyLoginCopy = () => {
-  if (!remoteMode()) return;
+  if (!cloudConfigured()) return;
   loginPwd.placeholder = "输入大家共用的密码";
   try {
     const last = localStorage.getItem("muse_name");
@@ -4322,18 +4370,23 @@ settingsReady.then(applyLoginCopy);
   await settingsReady;
   let auto = false;
   try {
-    const saved = sessionStorage.getItem(SESSION_KEY) || localStorage.getItem("muse_auto_login");
+    /* 云端模式：本机存着有效登录令牌就直接进（令牌由服务端签发；被吊销/过期时写入会提示重新登录） */
+    const saved = cloudConfigured()
+      ? (MuseCloud.loggedIn() ? MuseCloud.currentUser() : "")
+      : (sessionStorage.getItem(SESSION_KEY) || localStorage.getItem("muse_auto_login"));
     if (saved) {
-      if (!sessionStorage.getItem(SESSION_KEY)) {
-        try { sessionStorage.setItem(SESSION_KEY, saved); } catch (_) {}
-      }
+      try { sessionStorage.setItem(SESSION_KEY, saved); } catch (_) {}
       auto = true;
       loginLayer.classList.add("hidden");
       enterPlayer(saved);
-      /* 关键：按当前登录账号重新拉取点赞/评论状态（首次加载是按访客身份拉的，
-         不刷新会导致点赞状态错乱 → 重复点赞主键冲突 → “同步失败”） */
+      /* 按当前登录账号重新拉取（点赞状态按登录名隔离，不用访客身份） */
       try { await loadMemories(); } catch (_) { memories = []; }
       renderGrid();
+      /* 上次离线时排队的照片自动补传 */
+      try {
+        const n = await MuseCloud.flushQueue();
+        if (n) { try { await loadMemories(); renderGrid(); } catch (_) {} }
+      } catch (_) {}
     }
   } catch (_) {}
   if (!auto) { loginVideo.start(); trueFocus.start(); }

@@ -120,6 +120,19 @@ export function installMockGitHub({ owner = "o", repo = "r", branch = "main" } =
     get commitCount() { return commitLog.length; },
     read(path) { return files.get(path); },
     json(path) { const t = files.get(path); return t ? JSON.parse(t) : null; },
+    /** 按正常提交流程直接写一个文件（测试里用来造"老数据"） */
+    commitPath(path, content, message = "(test)") {
+      const tree = new Map(files);
+      tree.set(path, content);
+      const tSha = newSha("tree");
+      trees.set(tSha, tree);
+      const cSha = newSha("commit");
+      commits.set(cSha, { tree: tSha, parents: [ref] });
+      commitLog.push({ sha: cSha, message, files: new Set([path]) });
+      ref = cSha;
+      files.clear();
+      for (const [k, v] of tree) files.set(k, v);
+    },
     /** 安排一次冲突：下一次 ref 更新前，先用"别人"的身份提交一次 */
     injectConflict() {
       beforeRefUpdate = async () => {

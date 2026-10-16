@@ -8,8 +8,8 @@
  * 浏览器（Safari/Chrome）不受影响，正常提供缓存加速。 */
 const IS_APP_WEBVIEW = /;\s*wv\)/i.test(self.navigator && self.navigator.userAgent || "");
 
-const CACHE = "qbjd-muse-v1";
-const SHELL = ["./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
+const CACHE = "qbjd-muse-v2";
+const SHELL = ["./index.html", "./cloud.js", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
   if (IS_APP_WEBVIEW) {
