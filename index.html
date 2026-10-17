@@ -1022,6 +1022,98 @@ body.lock-scroll { overflow: hidden; }
   border-color: rgba(251,146,60,0.55);
   box-shadow: 0 4px 16px rgba(251,146,60,0.25);
 }
+
+/* ============ 通知：铃铛 / 角标 / 面板 / 弹出卡 ============ */
+.user-box .notif-btn {
+  position: relative;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: var(--text-dim);
+  display: grid; place-items: center;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.22s ease;
+}
+.user-box .notif-btn:hover {
+  color: var(--text);
+  border-color: rgba(168,85,247,0.55);
+  box-shadow: 0 4px 16px rgba(168,85,247,0.25);
+}
+.notif-dot {
+  position: absolute; top: -3px; right: -3px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff4d6d, #fb923c);
+  color: #fff; font-size: 10px; font-weight: 700;
+  display: grid; place-items: center;
+  box-shadow: 0 2px 8px rgba(255,77,109,0.5);
+}
+.notif-panel {
+  position: fixed; top: 66px;
+  right: max(14px, calc((100vw - 1060px) / 2));
+  width: min(360px, calc(100vw - 28px));
+  max-height: min(68vh, 540px);
+  display: flex; flex-direction: column;
+  background: rgba(20,16,34,0.94);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 18px;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+  z-index: 75; overflow: hidden;
+}
+.notif-head { display: flex; align-items: center; gap: 8px; padding: 13px 14px 8px; color: var(--text); }
+.notif-head b { font-size: 15px; letter-spacing: 0.5px; }
+.notif-head .spacer { margin-left: auto; }
+.notif-head button {
+  cursor: pointer; border: 0; background: none; color: var(--text-dim);
+  font-size: 12px; font-family: inherit; padding: 4px 7px; border-radius: 8px;
+}
+.notif-head button:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.notif-list { overflow: auto; padding: 4px 8px 10px; }
+.notif-item { display: flex; gap: 10px; padding: 10px; border-radius: 12px; cursor: pointer; }
+.notif-item:hover { background: rgba(255,255,255,0.05); }
+.notif-item.unread { background: rgba(168,85,247,0.09); }
+.notif-item .ni-icon {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center; flex: none;
+  background: rgba(168,85,247,0.16); color: #d8b4fe; font-size: 14px;
+}
+.notif-item .ni-body { min-width: 0; flex: 1; }
+.notif-item .ni-text { font-size: 13px; color: var(--text); line-height: 1.45; word-break: break-word; }
+.notif-item .ni-time { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+.notif-empty { padding: 28px 16px 32px; text-align: center; color: var(--text-dim); font-size: 13px; line-height: 1.75; }
+.notif-keep {
+  margin: 0 10px 10px; padding: 9px 12px;
+  border-radius: 12px; cursor: pointer;
+  border: 1px dashed rgba(168,85,247,0.45);
+  background: rgba(168,85,247,0.08);
+  color: #d8b4fe; font-size: 12.5px; font-family: inherit;
+}
+.notif-pop {
+  position: fixed; left: 50%; top: 16px;
+  transform: translate(-50%, -18px);
+  width: min(360px, calc(100vw - 28px));
+  display: flex; gap: 12px; align-items: center;
+  padding: 12px 14px;
+  background: rgba(24,19,40,0.96);
+  border: 1px solid rgba(168,85,247,0.4);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.55), 0 0 30px rgba(168,85,247,0.18);
+  backdrop-filter: blur(16px);
+  z-index: 80; opacity: 0; pointer-events: none; cursor: pointer;
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+.notif-pop.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.notif-pop img { width: 42px; height: 42px; border-radius: 10px; object-fit: cover; flex: none; background: rgba(255,255,255,0.06); }
+.notif-pop .np-icon {
+  width: 42px; height: 42px; border-radius: 10px; flex: none;
+  display: grid; place-items: center;
+  background: rgba(168,85,247,0.16); color: #d8b4fe; font-size: 17px;
+}
+.notif-pop .np-t { font-size: 13.5px; color: var(--text); line-height: 1.4; }
+.notif-pop .np-s { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
 /* user-box 靠右 */
 
 /* ============ 响应式 ============ */
@@ -1095,6 +1187,10 @@ body.lock-scroll { overflow: hidden; }
     <div class="user-box" id="userBox" hidden>
       <span class="hello">你好，<b id="userName">朋友</b></span>
       <span class="avatar" id="userAvatar">友</span>
+      <button class="notif-btn" id="btnNotif" title="动态" aria-label="动态">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span class="notif-dot" id="notifDot" hidden>0</span>
+      </button>
       <button class="logout" id="btnLogout" title="退出登录">退出</button>
     </div>
   </header>
@@ -1207,6 +1303,21 @@ body.lock-scroll { overflow: hidden; }
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- 通知面板 + 弹出卡 -->
+<div class="notif-panel" id="notifPanel" hidden>
+  <div class="notif-head">
+    <b>动态</b>
+    <span class="spacer"></span>
+    <button id="btnNotifRead">全部已读</button>
+    <button id="btnNotifClose" aria-label="关闭">✕</button>
+  </div>
+  <div class="notif-list" id="notifList"></div>
+  <button class="notif-keep" id="btnNotifKeep" hidden>让通知更可靠 · 允许后台运行</button>
+</div>
+<div class="notif-pop" id="notifPop" hidden></div>
+
+<script src="./mqtt-lite.js"></script>
 
 <script src="./cloud.js"></script>
 <script>
@@ -2946,6 +3057,198 @@ $("btnCmtSend").addEventListener("click", async () => {  const id = $("commentsM
   } finally { btn.disabled = false; }
 });
 
+/* ---------- 四e、通知：铃铛 / 面板 / 弹出卡 ---------- */
+const btnNotif = $("btnNotif");
+const notifPanel = $("notifPanel");
+const notifList = $("notifList");
+const notifDot = $("notifDot");
+const notifPop = $("notifPop");
+
+function notifText(n) {
+  const actor = n.actor || "有人";
+  const extra = n.text ? "：「" + n.text + "」" : "";
+  switch (n.type) {
+    case "new_photo":     return { icon: "✦", title: "新回忆", body: `${actor} 上传了一张照片` };
+    case "like_photo":    return { icon: "♥", title: "新的赞", body: `${actor} 赞了你的照片` };
+    case "comment_photo": return { icon: "💬", title: "新评论", body: `${actor} 评论了你的照片${extra}` };
+    case "like_comment":  return { icon: "♥", title: "新的赞", body: `${actor} 赞了你的评论` };
+    case "reply_comment": return { icon: "↩", title: "新回复", body: `${actor} 回复了你的评论${extra}` };
+    default:              return { icon: "✦", title: "新动态", body: `${actor} 有新动态` };
+  }
+}
+
+function renderNotifBadge() {
+  const n = cloudConfigured() && window.MuseCloud ? MuseCloud.unreadCount() : 0;
+  notifDot.hidden = !n;
+  notifDot.textContent = n > 9 ? "9+" : String(n);
+}
+
+function renderNotifPanel() {
+  const list = cloudConfigured() && window.MuseCloud ? MuseCloud.notifications() : [];
+  if (!list.length) {
+    notifList.innerHTML = `<div class="notif-empty">还没有新动态<br>有人上传照片、点赞或评论时，这里会出现</div>`;
+    return;
+  }
+  notifList.innerHTML = list.map((n) => {
+    const t = notifText(n);
+    return `<div class="notif-item${n.read ? "" : " unread"}" data-id="${escapeHtml(n.id)}">
+      <span class="ni-icon">${t.icon}</span>
+      <div class="ni-body">
+        <div class="ni-text">${escapeHtml(t.body)}</div>
+        <div class="ni-time">${fmtCmtTime(n.at || Date.now())}</div>
+      </div>
+    </div>`;
+  }).join("");
+  notifList.querySelectorAll(".notif-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      const n = MuseCloud.notifications().find((x) => x.id === el.dataset.id);
+      if (!n) return;
+      MuseCloud.markRead(n.id);
+      renderNotifBadge();
+      if (!notifPanel.hidden) renderNotifPanel();
+      openNotifTarget(n);
+    });
+  });
+}
+
+function toggleNotifPanel(force) {
+  const show = force === undefined ? notifPanel.hidden : !!force;
+  notifPanel.hidden = !show;
+  if (show) { renderNotifPanel(); refreshKeepButton(); }
+}
+
+function openNotifTarget(n) {
+  toggleNotifPanel(false);
+  hideNotifPop();
+  const m = memories.find((x) => x.id === n.photoId);
+  if (!m) {
+    toast("这条回忆还在路上，稍后再点一次");
+    loadMemories().then(renderGrid).catch(() => {});
+    return;
+  }
+  if (n.commentId) { showCommentsModal(m.id); return; }
+  const s = (m.season ?? seasonOf(m.createdAt));
+  if (s !== seasonIdx) setSeason(s);
+  setTimeout(() => photoViewer.open(m, null), s !== seasonIdx ? 420 : 0);
+}
+
+/* 弹出卡：一次只弹一张，6.5 秒后自动收，排队显示 */
+const notifPopQueue = [];
+let notifPopBusy = false;
+function enqueueNotifPop(n) {
+  if (notifPopQueue.some((x) => x.id === n.id)) return;
+  notifPopQueue.push(n);
+  if (!notifPopBusy) showNextNotifPop();
+}
+function showNextNotifPop() {
+  const n = notifPopQueue.shift();
+  if (!n) {
+    notifPopBusy = false;
+    notifPop.classList.remove("show");
+    setTimeout(() => { if (!notifPopBusy) notifPop.hidden = true; }, 320);
+    return;
+  }
+  notifPopBusy = true;
+  const t = notifText(n);
+  const m = memories.find((x) => x.id === n.photoId);
+  const thumb = (m && m.thumbUrl) || (n.photoId && cloudConfigured() ? MuseCloud.CFG.DATA + "/photos/thumb_" + n.photoId : "");
+  notifPop.hidden = false;
+  notifPop.dataset.id = n.id;
+  notifPop.innerHTML = `<div class="np-icon">${t.icon}</div>
+    <div><div class="np-t">${escapeHtml(t.body)}</div><div class="np-s">${escapeHtml(t.title)} · 点一下看看</div></div>`;
+  if (thumb) {
+    const img = new Image();
+    img.alt = "";
+    img.onload = () => { const ic = notifPop.querySelector(".np-icon"); if (ic) ic.replaceWith(img); };
+    img.src = thumb;
+  }
+  requestAnimationFrame(() => notifPop.classList.add("show"));
+  clearTimeout(notifPop._t);
+  notifPop._t = setTimeout(() => hideNotifPop(true), 6500);
+}
+function hideNotifPop(next) {
+  clearTimeout(notifPop._t);
+  notifPop.classList.remove("show");
+  setTimeout(() => {
+    if (next) { notifPop.hidden = true; notifPopBusy = false; showNextNotifPop(); }
+    else if (!notifPopQueue.length) { notifPop.hidden = true; notifPopBusy = false; }
+  }, 300);
+}
+
+btnNotif.addEventListener("click", (e) => { e.stopPropagation(); toggleNotifPanel(); });
+$("btnNotifClose").addEventListener("click", () => toggleNotifPanel(false));
+$("btnNotifRead").addEventListener("click", () => {
+  MuseCloud.markAllRead(); renderNotifBadge(); renderNotifPanel();
+});
+document.addEventListener("click", (e) => {
+  if (notifPanel.hidden) return;
+  if (notifPanel.contains(e.target) || btnNotif.contains(e.target)) return;
+  toggleNotifPanel(false);
+});
+notifPop.addEventListener("click", () => {
+  const n = MuseCloud.notifications().find((x) => x.id === notifPop.dataset.id);
+  if (!n) return;
+  MuseCloud.markRead(n.id); renderNotifBadge(); openNotifTarget(n);
+});
+
+/* App（安卓外壳）里的系统通知服务：把主题交给原生层，关掉 App 也能收 */
+async function syncNativeNotify() {
+  const cap = window.Capacitor;
+  if (!cap || !cap.Plugins || !cap.Plugins.MuseNotify) return;
+  try {
+    if (cloudConfigured() && MuseCloud.loggedIn()) {
+      const info = MuseCloud.realtimeInfo();
+      if (info && info.topic) {
+        await cap.Plugins.MuseNotify.start({ topic: info.topic, url: info.url, user: MuseCloud.currentUser() });
+      }
+    } else {
+      await cap.Plugins.MuseNotify.stop();
+    }
+  } catch (_) {}
+}
+
+/* 点系统通知进来时，原生层把目标存在这里：直接打开那条回忆 / 评论 */
+async function checkPendingNotifyTarget() {
+  const cap = window.Capacitor;
+  if (!cap || !cap.Plugins || !cap.Plugins.MuseNotify) return;
+  try {
+    const t = await cap.Plugins.MuseNotify.takePendingTarget();
+    if (!t || !t.photoId) return;
+    if (!memories.some((m) => m.id === t.photoId)) {
+      try { await loadMemories(); renderGrid(); } catch (_) {}
+    }
+    openNotifTarget({ photoId: t.photoId, commentId: t.commentId || "", type: "from_notification" });
+  } catch (_) {}
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkPendingNotifyTarget(); });
+window.addEventListener("focus", checkPendingNotifyTarget);
+
+/* "允许后台运行"：只有装在 App 里、且还没放行时才显示 */
+async function refreshKeepButton() {
+  const btn = $("btnNotifKeep");
+  const cap = window.Capacitor;
+  if (!cap || !cap.Plugins || !cap.Plugins.MuseNotify) { btn.hidden = true; return; }
+  try {
+    const st = await cap.Plugins.MuseNotify.status();
+    btn.hidden = !!st.ignoringBatteryOptimizations;
+  } catch (_) { btn.hidden = true; }
+}
+$("btnNotifKeep").addEventListener("click", () => {
+  try { window.Capacitor.Plugins.MuseNotify.openBatterySettings(); } catch (_) {}
+});
+
+/* 把通知接进页面：收到就更新角标/面板，10 分钟内的新事件才弹卡片 */
+if (cloudConfigured()) {
+  MuseCloud.setNotifier((n) => {
+    renderNotifBadge();
+    if (!notifPanel.hidden) renderNotifPanel();
+    if (Date.now() - (n.at || 0) < 10 * 60 * 1000) enqueueNotifPop(n);
+  });
+  MuseCloud.setWallDirty(async () => { await loadMemories(); renderGrid(); });
+  renderNotifBadge();
+  refreshKeepButton();
+}
+
 /* Esc 关闭（层级：删除确认 > 故事弹窗 > 评论弹窗 > 照片查看器 > 粒子查看器） */
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
@@ -4327,6 +4630,8 @@ loginForm.addEventListener("submit", async (e) => {
     const n = await MuseCloud.flushQueue();
     if (n) { toast(`已补传 ${n} 张排队的照片 ✦`); try { await loadMemories(); renderGrid(); } catch (_) {} }
   } catch (_) {}
+  syncNativeNotify();
+  checkPendingNotifyTarget();
 });
 
 /* 输入即时清除错误提示 */
@@ -4345,6 +4650,9 @@ togglePwd.addEventListener("click", () => {
 btnLogout.addEventListener("click", () => {
   try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
   try { localStorage.removeItem("muse_auto_login"); } catch (_) {}   // 退出后清除自动登录
+  if (cloudConfigured()) { try { MuseCloud.logout(); } catch (_) {} }
+  try { window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.MuseNotify && Capacitor.Plugins.MuseNotify.stop(); } catch (_) {}
+  renderNotifBadge();
   showLogin();
 });
 
@@ -4387,6 +4695,8 @@ settingsReady.then(applyLoginCopy);
         const n = await MuseCloud.flushQueue();
         if (n) { try { await loadMemories(); renderGrid(); } catch (_) {} }
       } catch (_) {}
+      syncNativeNotify();
+      checkPendingNotifyTarget();
     }
   } catch (_) {}
   if (!auto) { loginVideo.start(); trueFocus.start(); }

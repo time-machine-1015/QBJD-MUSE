@@ -22,6 +22,7 @@ const env = {
   SESSION_SECRET: "test-secret",
   PASSCODE_HASH: await sha256Hex("123456"),
   ALLOWED_USERS: "chenjianhao,yangzelin,tanglinshu",
+  MQTT_SECRET: "test-mqtt-secret",
 };
 
 const mock = installMockGitHub({ owner: "o", repo: "r" });
@@ -46,10 +47,16 @@ console.log("\n[1] 健康检查与登录");
 }
 
 const tokens = {};
+const topics = {};
 for (const u of ["chenjianhao", "yangzelin", "tanglinshu"]) {
   const r = await call("/api/login", { user: u, passcode: "123456" });
   check("登录成功 " + u, r.body.ok === true && !!r.body.token, r.body);
+  check("登录返回专属 MQTT 主题 " + u,
+    !!r.body.mqtt && r.body.mqtt.url.startsWith("wss://") &&
+    new RegExp("^qbjd/[0-9a-f]{12}/u/" + u + "$").test(r.body.mqtt.topic),
+    r.body.mqtt);
   tokens[u] = r.body.token;
+  topics[u] = r.body.mqtt.topic;
 }
 
 console.log("\n[2] 上传照片：一次操作 = 一个提交，其余 7 类人收到通知");
@@ -77,6 +84,7 @@ console.log("\n[3] 点赞照片：幂等 + 通知作者");
 {
   const r1 = await call("/api/like", { photoId, add: true }, tokens["yangzelin"]);
   check("点赞成功并产生事件", r1.body.ok === true && r1.body.event.type === "like_photo", r1.body);
+  check("点赞响应带上了照片作者的推送主题", Array.isArray(r1.body.mqttTopics) && r1.body.mqttTopics[0] === topics["chenjianhao"], r1.body.mqttTopics);
   check("回忆墙里的点赞名单已更新", mock.json("state/wall.json").memories[0].likes.includes("yangzelin"));
   const inboxC = mock.json("inbox/chenjianhao.json");
   check("照片作者收到 like_photo 通知", inboxC[0].type === "like_photo" && inboxC[0].actor === "yangzelin", inboxC[0]);

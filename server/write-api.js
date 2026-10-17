@@ -80,7 +80,13 @@ function config(env) {
   const branch = env.GH_BRANCH || "main";
   if (!owner || !repo) throw new Error("服务端未配置 GH_OWNER / GH_REPO");
   if (!env.GH_TOKEN) throw new Error("服务端未配置 GH_TOKEN");
-  return { owner, repo, branch, token: env.GH_TOKEN, secret: env.SESSION_SECRET || "", pass: env.PASSCODE_HASH || "" };
+  return {
+    owner, repo, branch, token: env.GH_TOKEN,
+    secret: env.SESSION_SECRET || "",
+    pass: env.PASSCODE_HASH || "",
+    mqttSecret: env.MQTT_SECRET || "",
+    mqttUrl: env.MQTT_URL || "wss://broker.emqx.io:8084/mqtt",
+  };
 }
 function users(env) {
   return String(env.ALLOWED_USERS || "")
@@ -90,6 +96,20 @@ const displayName = (env, name) => {
   const hit = users(env).find((u) => u === String(name || "").trim().toLowerCase());
   return hit || String(name || "").trim();
 };
+
+/* ---------- MQTT 话题 ----------
+ * 每人一个专属主题，主题名由服务端用密钥算出来（客户端只拿到自己的那一串，
+ * 不在前端公开任何全局密钥）。推送不经过 GitHub，所以是"秒到"而不是等构建。 */
+async function topicBase(cfg) {
+  if (!cfg.mqttSecret) return "";
+  return "qbjd/" + (await hmacHex(cfg.mqttSecret, "base")).slice(0, 12);
+}
+async function userTopic(cfg, user) {
+  const base = await topicBase(cfg);
+  if (!base) return "";
+  const safe = String(user || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  return safe ? base + "/u/" + safe : "";
+}
 
 /* ---------- GitHub API ---------- */
 async function gh(cfg, path, init) {
@@ -440,7 +460,10 @@ export async function handle(request, env) {
       const got = await sha256Hex(pass);
       if (!timingSafeEqual(want, got)) return json({ ok: false, error: "bad-passcode" }, 403);
       const user = displayName(env, name);
-      return json({ ok: true, user, token: await issueToken(cfg, user) });
+      return json({
+        ok: true, user, token: await issueToken(cfg, user),
+        mqtt: { url: cfg.mqttUrl, topic: await userTopic(cfg, user) },
+      });
     }
 
     /* 以下接口都需要登录令牌 */
@@ -472,6 +495,11 @@ export async function handle(request, env) {
       }
     }
     if (!result && lastErr) throw lastErr;
+    /* 告诉客户端：这次操作该推给谁（主题），客户端拿到后立即 MQTT 推送 */
+    if (result && Array.isArray(result.recipients) && result.recipients.length) {
+      const topics = await Promise.all(result.recipients.map((u) => userTopic(cfg, u)));
+      result.mqttTopics = topics.filter(Boolean);
+    }
     return json({ ok: true, actor, ...result });
   } catch (e) {
     const status = e instanceof HttpError ? e.status : (e && e.conflict ? 409 : 500);
