@@ -1,0 +1,9 @@
+{
+  "name": "qbjd-muse-write-api",
+  "private": true,
+  "type": "module",
+  "description": "QBJD MUSE 写入服务（唯一写者）：本地可跑测试，线上部署到 Deno Deploy",
+  "scripts": {
+    "test": "node test-local.mjs && node test-cloud.mjs"
+  }
+}
