@@ -18,6 +18,16 @@
 
 > 数据仓库会是公开的（照片本来也是公开的）。里面只有：照片、回忆墙快照、评论、通知收件箱。**没有任何密钥。**
 
+## 一·前置、把 server 代码放上 GitHub（约 1 分钟）
+
+Deno Deploy 要从仓库里取 `server/write-api.js`，所以先把 `server/` 这个文件夹传上去：
+
+1. 打开 `https://github.com/time-machine-1015/QBJD-MUSE` → **Add file → Upload files**
+2. 把本机的 `server` 文件夹拖进去（**只拖这一个文件夹**，不要拖 index.html / cloud.js / 整个项目）
+3. 页面应显示 `server/write-api.js` 等文件 → **Commit changes**
+
+> `server/` 里没有任何密钥：token 只存在下一步的 Deno 环境变量里。
+
 ## 二、建一个"只够用"的 token（约 2 分钟）
 
 1. GitHub 头像 → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**
@@ -44,8 +54,13 @@
 | `ALLOWED_USERS` | 8 个名字，逗号分隔，如 `chenjianhao,yangzelin,...` |
 | `PASSCODE_HASH` | 跑 `node server/hash-passcode.mjs 你的共享密码` 得到 |
 | `SESSION_SECRET` | 同上那条命令输出的随机串 |
+| `MQTT_SECRET` | 任意 32 位随机字符（生成通知主题用；所有人必须用同一串） |
 
 5. 部署完成后会得到一个地址，形如 `https://qbjd-muse-write.deno.dev`
+
+> 如果界面里没有"从 GitHub 部署"，备用方案是在本机跑：
+> `npx -y deployctl deploy --project=qbjd-muse-write --prod server/write-api.js`
+> （需要先在 Deno Deploy 账号设置里创建 Access Token）
 
 ## 四、验证（约 1 分钟）
 
