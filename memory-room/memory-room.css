@@ -1,0 +1,630 @@
+
+/* ============================================================
+   回忆收存室 v2 —— 照片 3D 点云化（three.js）+ 按住说话存档
+   视觉体系 1:1 提取自 pendereckisgarden.pl/pl/dwor-mistrza
+    底色 #241a21 深暖黑 · 主字 #E2D8CA 暖米白 · 灰青 #859493
+   玫瑰灰 #AB9694（录音/进度）· 湖青 #59868A（交互控件）
+   全部样式以 #memory-room 作用域前缀，嵌入大项目零冲突
+   ============================================================ */
+
+#memory-room {
+  --mr-bg: #0a0708;          /* 近纯黑（贴合参考图：黑底衬托发光粒子） */
+  --mr-ink: #E2D8CA;         /* 暖米白主文字 */
+  --mr-ink-dim: #DDD2C3;     /* 次级米白 */
+  --mr-grey: #859493;        /* 静音灰青 */
+  --mr-rose: #AB9694;        /* 玫瑰灰 · 录音强调 */
+  --mr-teal: #59868A;        /* 湖青 · 功能控件 */
+  --mr-serif: Georgia, "Times New Roman", "Songti SC", "STSong", SimSun, serif;
+  --mr-sans: "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;             /* 默认隐藏，由宿主通过 .is-open 控制显隐 */
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 540px;
+  overflow: hidden;
+  background: var(--mr-bg);
+  color: var(--mr-ink);
+  font-family: var(--mr-sans);
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+  touch-action: manipulation;
+}
+#memory-room.is-open { display: block; }
+#memory-room *, #memory-room *::before, #memory-room *::after { box-sizing: border-box; }
+
+/* ---------- 双层画布：氛围层（2D 噪点+暗角）+ 粒子层（three.js） ---------- */
+#memory-room .mr-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#memory-room .mr-canvas--ambience { z-index: 0; }
+#memory-room .mr-canvas--particles { z-index: 1; }
+
+/* ---------- 左上：存档抽屉触发 ---------- */
+#memory-room .mr-archive-trigger {
+  position: absolute;
+  top: 26px;
+  left: 26px;
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px 0;
+  color: var(--mr-ink);
+}
+#memory-room .mr-archive-trigger .mr-burger {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 22px;
+}
+#memory-room .mr-archive-trigger .mr-burger span {
+  display: block;
+  height: 1px;
+  background: var(--mr-ink);
+  transition: transform .45s cubic-bezier(.22,.8,.3,1), opacity .3s;
+}
+#memory-room .mr-archive-trigger.is-open .mr-burger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+#memory-room .mr-archive-trigger.is-open .mr-burger span:nth-child(2) { opacity: 0; }
+#memory-room .mr-archive-trigger.is-open .mr-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+#memory-room .mr-archive-trigger .mr-label,
+#memory-room .mr-archive-trigger .mr-count {
+  font-family: var(--mr-serif);
+  font-size: 24px;
+  line-height: 32px;
+  letter-spacing: -0.24px;
+  color: rgba(226, 216, 202, 0.72);
+  transition: opacity .3s;
+}
+#memory-room .mr-archive-trigger .mr-count { color: rgba(133, 148, 147, 0.75); }
+#memory-room .mr-archive-trigger.is-open .mr-label,
+#memory-room .mr-archive-trigger.is-open .mr-count { opacity: 0; visibility: hidden; }
+
+/* ---------- 右上：标题区 ---------- */
+#memory-room .mr-brand {
+  position: absolute;
+  top: 22px;
+  right: 74px;
+  z-index: 10;
+  text-align: right;
+  pointer-events: none;
+}
+#memory-room .mr-brand .mr-title {
+  font-family: var(--mr-serif);
+  font-size: 27px;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  color: rgba(226, 216, 202, 0.78);
+  margin: 0;
+}
+#memory-room .mr-brand .mr-coord {
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  color: rgba(226, 216, 202, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+#memory-room .mr-brand .mr-status {
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--mr-grey);
+  font-variant-numeric: tabular-nums;
+  min-height: 16px;
+}
+
+/* ---------- 右上：关闭按钮（返回回忆墙） ---------- */
+#memory-room .mr-close {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  z-index: 22;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(226, 216, 202, 0.06);
+  border: 1px solid rgba(226, 216, 202, 0.18);
+  border-radius: 50%;
+  color: rgba(226, 216, 202, 0.85);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .3s, transform .3s, border-color .3s;
+}
+#memory-room .mr-close:hover {
+  background: rgba(226, 216, 202, 0.14);
+  border-color: rgba(226, 216, 202, 0.4);
+  transform: scale(1.06);
+}
+
+/* ---------- 章节字距标题 ---------- */
+#memory-room .mr-chapter {
+  position: absolute;
+  left: 50%;
+  top: 13%;
+  transform: translateX(-50%);
+  z-index: 5;
+  text-align: center;
+  pointer-events: none;
+}
+#memory-room .mr-chapter .mr-chapter-text {
+  font-family: var(--mr-serif);
+  font-size: clamp(17px, 2.1vw, 26px);
+  letter-spacing: 0.62em;
+  margin-right: -0.62em;
+  color: rgba(226, 216, 202, 0.62);
+  white-space: nowrap;
+}
+#memory-room .mr-chapter .mr-chapter-sub {
+  margin-top: 14px;
+  font-size: 11px;
+  letter-spacing: 0.27em;
+  margin-right: -0.27em;
+  text-transform: uppercase;
+  color: var(--mr-grey);
+  white-space: nowrap;
+}
+
+/* ============================================================
+   底部控制栈（对应目标截图布局：转写文字 / 麦克风 / 控制行 / 更换照片）
+   ============================================================ */
+#memory-room .mr-stack {
+  position: absolute;
+  left: 50%;
+  bottom: calc(34px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  width: 100%;
+  pointer-events: none;
+}
+#memory-room .mr-stack > * { pointer-events: auto; }
+
+/* 转写文字槽（idle 提示 / recording 实时转写 / review 定稿） */
+#memory-room .mr-transcript {
+  min-height: 88px;
+  max-width: min(640px, 84vw);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+#memory-room .mr-transcript .mr-transcript-role {
+  font-size: 10px;
+  letter-spacing: 0.27em;
+  margin-right: -0.27em;
+  text-transform: uppercase;
+  color: var(--mr-rose);
+  min-height: 12px;
+}
+#memory-room .mr-transcript .mr-transcript-text {
+  font-family: var(--mr-serif);
+  font-size: 21px;
+  line-height: 1.55;
+  color: var(--mr-ink);
+  word-break: break-word;
+  text-shadow: 0 0 22px rgba(226, 216, 202, 0.28);
+  max-width: 100%;
+}
+#memory-room .mr-transcript .mr-transcript-text:empty::before {
+  content: "正在聆听……";
+  color: var(--mr-grey);
+}
+#memory-room .mr-transcript.is-idle .mr-transcript-text {
+  color: rgba(226, 216, 202, 0.82);
+  font-size: 13px;
+  letter-spacing: 0.3em;
+  text-shadow: none;
+}
+
+/* 麦克风按钮 + 录音指示点 */
+#memory-room .mr-mic-wrap { position: relative; }
+#memory-room .mr-rec-dot {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--mr-rose);
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity .3s, transform .3s;
+  pointer-events: none;
+}
+#memory-room .mr-rec-dot::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid var(--mr-rose);
+  animation: mr-dot-pulse 1.6s ease-out infinite;
+}
+@keyframes mr-dot-pulse {
+  0% { transform: scale(0.5); opacity: 0.9; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+#memory-room.is-recording .mr-rec-dot { opacity: 1; transform: scale(1); }
+
+#memory-room .mr-speak {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 1px solid rgba(226, 216, 202, 0.85);
+  cursor: pointer;
+  background: rgba(55, 41, 51, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mr-ink);
+  transition: transform .25s cubic-bezier(.22,.8,.3,1), background-color .3s, border-color .3s;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+#memory-room .mr-speak:hover { background: rgba(89, 134, 138, 0.35); border-color: var(--mr-ink); }
+#memory-room .mr-speak:active, #memory-room.is-recording .mr-speak {
+  transform: scale(0.92);
+  background: rgba(89, 134, 138, 0.5);
+}
+#memory-room .mr-speak:focus-visible { box-shadow: 0 0 0 2px rgba(226, 216, 202, .5); }
+#memory-room .mr-speak[disabled] { opacity: .4; cursor: default; }
+
+/* 麦克风镂空图标 */
+#memory-room .mr-speak .mr-mic { width: 22px; height: 30px; position: relative; }
+#memory-room .mr-speak .mr-mic::before {
+  content: ""; position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+  width: 11px; height: 17px; border: 1.5px solid var(--mr-ink); border-radius: 6px;
+}
+#memory-room .mr-speak .mr-mic::after {
+  content: ""; position: absolute; left: 50%; top: 13px; transform: translateX(-50%);
+  width: 17px; height: 13px; border: 1.5px solid var(--mr-ink); border-top: none; border-radius: 0 0 9px 9px;
+}
+#memory-room .mr-speak .mr-mic .mr-mic-stand {
+  position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: 1.5px; height: 6px; background: var(--mr-ink);
+}
+#memory-room .mr-speak .mr-mic .mr-mic-base {
+  position: absolute; left: 50%; bottom: -1px; transform: translateX(-50%);
+  width: 7px; height: 1.5px; background: var(--mr-ink);
+}
+/* 录音玫瑰灰进度环 */
+#memory-room .mr-speak .mr-ring {
+  position: absolute; inset: -9px; border-radius: 50%;
+  border: 2px solid transparent; transform: rotate(-90deg); pointer-events: none;
+}
+#memory-room.is-recording .mr-speak .mr-ring {
+  border-top-color: var(--mr-rose);
+  border-right-color: var(--mr-rose);
+  animation: mr-ring-spin 1.4s linear infinite;
+}
+@keyframes mr-ring-spin { to { transform: rotate(270deg); } }
+
+/* 控制行：散作光尘 / 计时 / 保存 / 放弃 */
+#memory-room .mr-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+}
+#memory-room .mr-ctl {
+  font-family: var(--mr-sans);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--mr-ink);
+  background: rgba(20, 12, 18, 0.5);
+  border: 1px solid rgba(226, 216, 202, 0.4);
+  border-radius: 999px;
+  padding: 11px 20px;
+  cursor: pointer;
+  transition: background-color .3s, border-color .3s, color .3s, opacity .3s;
+  white-space: nowrap;
+}
+#memory-room .mr-ctl:hover { border-color: var(--mr-ink); background: rgba(89, 134, 138, 0.3); }
+#memory-room .mr-ctl[disabled] { opacity: .35; cursor: default; }
+#memory-room .mr-ctl[hidden], #memory-room .mr-timer[hidden] { display: none; }
+
+/* 计时框 */
+#memory-room .mr-timer {
+  font-family: var(--mr-sans);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  color: var(--mr-ink);
+  background: rgba(20, 12, 18, 0.62);
+  border: 1px solid rgba(171, 150, 148, 0.55);
+  border-radius: 10px;
+  padding: 11px 16px;
+  line-height: 1;
+}
+/* 保存（湖青） */
+#memory-room .mr-ctl--save {
+  background: rgba(89, 134, 138, 0.4);
+  border-color: rgba(226, 216, 202, 0.55);
+}
+#memory-room .mr-ctl--save:hover { background: rgba(89, 134, 138, 0.6); }
+/* 放弃（玫瑰灰细边圆钮 ×） */
+#memory-room .mr-ctl--discard {
+  width: 40px; height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(171, 150, 148, 0.85);
+  background: rgba(20, 12, 18, 0.35);
+  font-size: 19px;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+#memory-room .mr-ctl--discard:hover { border-color: var(--mr-rose); color: var(--mr-rose); background: rgba(171, 150, 148, 0.15); }
+
+/* 底部：更换照片 */
+#memory-room .mr-upload {
+  font-family: var(--mr-sans);
+  font-size: 12.5px;
+  letter-spacing: 0.12em;
+  color: var(--mr-ink);
+  background: rgba(20, 12, 18, 0.55);
+  border: 1px solid rgba(226, 216, 202, 0.3);
+  border-radius: 999px;
+  padding: 10px 22px;
+  cursor: pointer;
+  transition: background-color .3s, border-color .3s;
+}
+#memory-room .mr-upload:hover { border-color: var(--mr-ink); }
+
+/* ---------- 存档抽屉 ---------- */
+#memory-room .mr-drawer {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: min(430px, 92vw);
+  z-index: 20;
+  background: rgba(55, 41, 51, 0.95);
+  transform: translateX(-102%);
+  transition: transform .55s cubic-bezier(.22,.8,.3,1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#memory-room .mr-drawer.is-open { transform: translateX(0); }
+#memory-room .mr-drawer-head {
+  padding: 26px 30px 22px 84px; /* 左侧预留 X 关闭钮空间（抽屉仅打开时可见） */
+  border-bottom: 1px solid rgba(226, 216, 202, 0.14);
+  flex: none;
+}
+#memory-room .mr-drawer-head .mr-drawer-title {
+  font-family: var(--mr-serif);
+  font-size: 22px; letter-spacing: 0.34em; margin-right: -0.34em; color: var(--mr-ink);
+}
+#memory-room .mr-drawer-head .mr-drawer-sub {
+  margin-top: 10px; font-size: 11px; letter-spacing: 0.27em; text-transform: uppercase; color: var(--mr-grey);
+}
+#memory-room .mr-drawer-list {
+  flex: 1; overflow-y: auto; padding: 18px 30px 30px;
+  scrollbar-width: thin; scrollbar-color: rgba(226,216,202,.25) transparent;
+}
+#memory-room .mr-drawer-list::-webkit-scrollbar { width: 4px; }
+#memory-room .mr-drawer-list::-webkit-scrollbar-thumb { background: rgba(226,216,202,.25); }
+#memory-room .mr-empty {
+  padding: 46px 0; text-align: center;
+  font-family: var(--mr-serif); font-size: 15px; line-height: 2; color: var(--mr-grey);
+}
+/* 存档卡 */
+#memory-room .mr-card {
+  position: relative;
+  border-left: 1px solid rgba(226, 216, 202, 0.5);
+  padding: 6px 4px 20px 20px;
+  margin: 22px 0;
+}
+#memory-room .mr-card .mr-card-date {
+  font-size: 10px; letter-spacing: 0.27em; text-transform: uppercase;
+  color: var(--mr-grey); margin-bottom: 9px;
+}
+#memory-room .mr-card .mr-card-text {
+  font-family: var(--mr-serif); font-size: 15.5px; line-height: 1.7;
+  color: var(--mr-ink); word-break: break-word;
+}
+#memory-room .mr-card .mr-card-text:empty::before {
+  content: "（未识别到文字，仅存声音）"; color: var(--mr-grey); font-size: 13px;
+}
+#memory-room .mr-card .mr-card-audio { margin-top: 13px; display: flex; align-items: center; gap: 14px; }
+#memory-room .mr-card .mr-play {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--mr-sans); font-size: 13px; letter-spacing: 0.12em;
+  color: var(--mr-ink); padding: 0; transition: color .3s; white-space: nowrap;
+}
+#memory-room .mr-card .mr-play:hover { color: #fff; }
+#memory-room .mr-card .mr-bar { flex: 1; height: 2px; background: rgba(226, 216, 202, 0.18); overflow: hidden; min-width: 60px; }
+#memory-room .mr-card .mr-bar span { display: block; height: 100%; width: 0; background: rgba(171, 150, 148, 0.9); }
+#memory-room .mr-card .mr-card-meta { margin-top: 9px; font-size: 10.5px; color: var(--mr-grey); display: flex; gap: 18px; align-items: center; }
+#memory-room .mr-card .mr-del {
+  background: none; border: none; cursor: pointer;
+  font-family: var(--mr-sans); font-size: 10.5px; letter-spacing: 0.1em;
+  color: var(--mr-grey); padding: 2px 0; transition: color .3s;
+}
+#memory-room .mr-card .mr-del:hover { color: var(--mr-rose); }
+#memory-room .mr-card .mr-del.is-confirm { color: var(--mr-rose); letter-spacing: 0.02em; }
+
+/* ---------- 抽屉遮罩 ---------- */
+#memory-room .mr-veil {
+  position: absolute; inset: 0; z-index: 19;
+  background: rgba(55, 41, 51, 0.6);
+  opacity: 0; pointer-events: none; transition: opacity .5s;
+}
+#memory-room .mr-veil.is-visible { opacity: 1; pointer-events: auto; }
+
+/* ---------- toast ---------- */
+#memory-room .mr-toast {
+  position: absolute;
+  left: 50%; top: 22%;
+  transform: translateX(-50%) translateY(10px);
+  z-index: 30;
+  background: rgba(55, 41, 51, 0.95);
+  border: 1px solid rgba(226, 216, 202, 0.2);
+  color: var(--mr-ink);
+  font-size: 12.5px; letter-spacing: 0.1em;
+  padding: 11px 22px;
+  opacity: 0; pointer-events: none;
+  transition: opacity .35s, transform .35s;
+  max-width: 82vw; text-align: center;
+}
+#memory-room .mr-toast.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---------- 加载幕布 ---------- */
+#memory-room .mr-loading {
+  position: absolute; inset: 0; z-index: 15;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  background: var(--mr-bg);
+  font-family: var(--mr-serif); font-size: 15px;
+  letter-spacing: 0.3em; margin-right: -0.3em;
+  color: var(--mr-ink);
+  transition: opacity .6s;
+}
+#memory-room .mr-loading.is-done { opacity: 0; pointer-events: none; }
+#memory-room .mr-loading .mr-loading-pct {
+  font-family: var(--mr-sans); font-size: 12px;
+  color: var(--mr-grey); font-variant-numeric: tabular-nums; letter-spacing: 0.1em;
+}
+
+/* ---------- 移动端 390px 适配 ---------- */
+
+/* ---------- 氛围调节面板 ---------- */
+#memory-room .mr-tune-btn {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 50%;
+  border: 1px solid rgba(226, 216, 202, 0.22);
+  background: rgba(12, 10, 9, 0.55);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: border-color .25s, background .25s;
+}
+#memory-room .mr-tune-btn:hover { border-color: var(--mr-teal); background: rgba(89, 134, 138, 0.25); }
+#memory-room .mr-tune-btn i {
+  display: block; width: 2px; height: 13px; border-radius: 1px;
+  background: rgba(226, 216, 202, 0.8); position: relative;
+}
+#memory-room .mr-tune-btn i::after {
+  content: ''; position: absolute; left: -2.5px; width: 7px; height: 3px; border-radius: 2px;
+  background: var(--mr-ink);
+}
+#memory-room .mr-tune-btn i:nth-child(1)::after { top: 2px; }
+#memory-room .mr-tune-btn i:nth-child(2)::after { top: 6px; }
+#memory-room .mr-tune-btn i:nth-child(3)::after { top: 1px; }
+
+#memory-room .mr-tune {
+  position: absolute;
+  right: 18px;
+  bottom: 70px;
+  z-index: 41;
+  width: 292px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 16px 18px 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(226, 216, 202, 0.14);
+  background: rgba(14, 12, 11, 0.92);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  transform-origin: bottom right;
+}
+#memory-room .mr-tune[hidden] { display: none; }
+#memory-room .mr-tune-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 10px; margin-bottom: 6px;
+  border-bottom: 1px solid rgba(226, 216, 202, 0.10);
+}
+#memory-room .mr-tune-head span {
+  font-family: var(--mr-serif); font-size: 14px; letter-spacing: .24em; color: rgba(226, 216, 202, .94);
+}
+#memory-room .mr-tune-head button {
+  width: 22px; height: 22px; border: 0; border-radius: 50%; cursor: pointer;
+  background: transparent; color: rgba(226,216,202,.6); font-size: 16px; line-height: 1;
+}
+#memory-room .mr-tune-head button:hover { color: var(--mr-ink); }
+#memory-room .mr-tune-row {
+  display: grid;
+  grid-template-columns: 76px 1fr 30px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  font-size: 12.5px;
+  color: rgba(226, 216, 202, 0.82);
+  letter-spacing: .04em;
+}
+#memory-room .mr-tune-row b {
+  font-weight: 500; font-size: 11.5px; text-align: right;
+  color: rgba(226, 216, 202, 0.5); font-variant-numeric: tabular-nums;
+}
+#memory-room .mr-tune-row input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 16px; background: transparent; cursor: pointer;
+}
+#memory-room .mr-tune-row input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px; border-radius: 2px; background: rgba(226, 216, 202, 0.22);
+}
+#memory-room .mr-tune-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 11px; height: 11px; margin-top: -4.5px; border-radius: 50%;
+  background: #f2e9dc; box-shadow: 0 0 10px rgba(242, 233, 220, 0.55);
+}
+#memory-room .mr-tune-row input[type="range"]::-moz-range-track { height: 2px; background: rgba(226,216,202,.22); }
+#memory-room .mr-tune-row input[type="range"]::-moz-range-thumb {
+  width: 11px; height: 11px; border: 0; border-radius: 50%; background: #f2e9dc;
+}
+@media screen and (max-width: 640px) {
+  #memory-room .mr-tune { width: calc(100vw - 36px); max-width: 320px; }
+}
+
+@media (max-width: 640px) {
+  #memory-room .mr-archive-trigger { top: 18px; left: 18px; }
+  #memory-room .mr-archive-trigger .mr-label,
+  #memory-room .mr-archive-trigger .mr-count { font-size: 19px; line-height: 26px; }
+  #memory-room .mr-brand { top: 15px; right: 18px; }
+  #memory-room .mr-brand .mr-title { font-size: 20px; }
+  #memory-room .mr-brand .mr-coord { font-size: 10px; }
+  #memory-room .mr-chapter { top: 10.5%; }
+  #memory-room .mr-chapter .mr-chapter-text { font-size: 16px; letter-spacing: 0.42em; margin-right: -0.42em; }
+  #memory-room .mr-chapter .mr-chapter-sub { font-size: 9.5px; letter-spacing: 0.2em; margin-right: -0.2em; margin-top: 10px; }
+  #memory-room .mr-stack { bottom: calc(26px + env(safe-area-inset-bottom)); gap: 12px; }
+  #memory-room .mr-transcript { min-height: 74px; gap: 6px; }
+  #memory-room .mr-transcript .mr-transcript-text { font-size: 17px; }
+  #memory-room .mr-transcript.is-idle .mr-transcript-text { font-size: 11.5px; letter-spacing: 0.14em; }
+  #memory-room .mr-speak { width: 66px; height: 66px; }
+  #memory-room .mr-ctl { font-size: 12px; padding: 10px 16px; }
+  #memory-room .mr-ctl--discard { width: 36px; height: 36px; font-size: 17px; }
+  #memory-room .mr-timer { font-size: 12px; padding: 10px 13px; }
+  #memory-room .mr-upload { font-size: 11.5px; padding: 9px 18px; }
+  #memory-room .mr-drawer-head { padding: 20px 22px 16px 68px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #memory-room .mr-speak .mr-ring { animation-duration: 4s; }
+  #memory-room .mr-rec-dot::after { animation-duration: 4s; }
+}
