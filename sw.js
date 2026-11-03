@@ -8,7 +8,7 @@
  * 浏览器（Safari/Chrome）不受影响，正常提供缓存加速。 */
 const IS_APP_WEBVIEW = /;\s*wv\)/i.test(self.navigator && self.navigator.userAgent || "");
 
-const CACHE = "qbjd-muse-v1";
+const CACHE = "qbjd-muse-v2";
 const SHELL = ["./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -87,7 +87,25 @@ self.addEventListener("fetch", (e) => {
     );
     return;
   }
-  /* 其他静态资源：缓存优先，miss 再走网络并顺手入缓存 */
+
+  /* 同源照片/缩略图：网络优先，成功后更新缓存；断网时回退缓存。
+     这样线上图片修好后能自动刷新，不会因为旧缓存一直显示坏图 */
+  if (/\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(url.pathname)) {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  /* 其他静态资源（js/css/字体等）：缓存优先，miss 再走网络并顺手入缓存 */
   e.respondWith(
     caches.match(e.request).then(
       (hit) =>
