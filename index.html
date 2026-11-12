@@ -1074,7 +1074,8 @@ body.lock-scroll { overflow: hidden; }
 .notif-head .spacer { margin-left: auto; }
 .notif-head button {
   cursor: pointer; border: 0; background: none; color: var(--text-dim);
-  font-size: 12px; font-family: inherit; padding: 4px 7px; border-radius: 8px;
+  font-size: 12px; font-family: inherit; padding: 8px 10px; border-radius: 8px;
+  min-width: 36px; min-height: 36px; touch-action: manipulation;   /* 移动端热区加固，防误触/点不中 */
 }
 .notif-head button:hover { color: var(--text); background: rgba(255,255,255,0.06); }
 .notif-list { overflow: auto; padding: 4px 8px 10px; }

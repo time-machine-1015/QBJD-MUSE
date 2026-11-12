@@ -10,9 +10,10 @@
  * ============================================================ */
 window.MuseCloud = (function () {
   const CFG = {
-    /* 云端地址：读 = 数据仓库 Pages；写 = Deno Deploy 云函数（新版域名 deno.net） */
+    /* 云端地址：读 = 数据仓库的 raw 源（不经 Pages 构建，永不存在 404 窗口，且 query 可穿透缓存、更新秒级可见）；
+       写 = Deno Deploy 云函数 */
     API: "https://qbjd-muse-write.time-machine-1015.deno.net",
-    DATA: "https://time-machine-1015.github.io/QBJD-MUSE-data",
+    DATA: "https://raw.githubusercontent.com/time-machine-1015/QBJD-MUSE-data/main",
 
     LEGACY_PHOTOS: "https://time-machine-1015.github.io/QBJD-MUSE/photos/",   /* 旧站照片兜底 */
     MQTT: "wss://broker.emqx.io:8084/mqtt",                                   /* 阶段 3 用 */
