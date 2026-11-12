@@ -3524,7 +3524,7 @@ const pixelSnow = (() => {
 /* ---------- 季节背景联动：春=Antigravity 磁力环 / 夏=星尘云 / 秋=AeroShards 碎片流 / 冬=像素雪 ----------
    移动端（≤700px，与登录页移动端判定同一断点）：粒子引擎全部停用，改用对应季节静态背景图；
    桌面端逻辑不变。跨过断点（旋转屏幕/调窗口）时自动在静态图与动态粒子间切换 */
-const SEASON_BG_IMGS = ["bg/spring.jpg", "bg/summer.jpg", "bg/autumn.jpg", "bg/winter.jpg"];
+const SEASON_BG_IMGS = ["bg/spring2.jpg", "bg/summer2.jpg", "bg/autumn2.jpg", "bg/winter2.jpg"];   /* v2：去水印版，换文件名避开 CDN 旧缓存 */
 const mobileBgMQ = window.matchMedia("(max-width: 700px)");
 function applySeasonBg(i) {
   const bg = document.querySelector(".aero-bg");
