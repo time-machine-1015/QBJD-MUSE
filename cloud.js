@@ -10,12 +10,9 @@
  * ============================================================ */
 window.MuseCloud = (function () {
   const CFG = {
-    /* 云端地址：读 = 数据仓库 Pages；写 = Deno Deploy 云函数。
-       【临时留空 = 本机模式兜底】：Deno 云函数部署完成后再填回：
-       API  = https://qbjd-muse-write.deno.dev
-       DATA = https://time-machine-1015.github.io/QBJD-MUSE-data */
-    API: "",
-    DATA: "",
+    /* 云端地址：读 = 数据仓库 Pages；写 = Deno Deploy 云函数（新版域名 deno.net） */
+    API: "https://qbjd-muse-write.time-machine-1015.deno.net",
+    DATA: "https://time-machine-1015.github.io/QBJD-MUSE-data",
 
     LEGACY_PHOTOS: "https://time-machine-1015.github.io/QBJD-MUSE/photos/",   /* 旧站照片兜底 */
     MQTT: "wss://broker.emqx.io:8084/mqtt",                                   /* 阶段 3 用 */
