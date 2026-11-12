@@ -8,7 +8,7 @@
  * 浏览器（Safari/Chrome）不受影响，正常提供缓存加速。 */
 const IS_APP_WEBVIEW = /;\s*wv\)/i.test(self.navigator && self.navigator.userAgent || "");
 
-const CACHE = "qbjd-muse-v4";
+const CACHE = "qbjd-muse-v5";
 const SHELL = ["./index.html", "./cloud.js", "./manifest.json", "./icon-192.png", "./icon-512.png",
   "./bg/spring2.jpg", "./bg/summer2.jpg", "./bg/autumn2.jpg", "./bg/winter2.jpg"];   // 季节静态背景 v2（去水印）
 

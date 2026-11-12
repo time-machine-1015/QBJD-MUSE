@@ -153,6 +153,27 @@ window.MuseCloud = (function () {
     } catch (_) { return []; }
   }
 
+  /* 声音（说说）：列表直接读数据仓库 raw（秒级）；上传/删除走云函数（一次提交 + CAS）。
+     blobToB64 复用上方 uploadPhoto 已有的实现 */
+  async function loadVoices(photoId) {
+    try {
+      const res = await fetch(snapshotUrl("voices/" + photoId + ".json"), { cache: "no-store" });
+      if (!res.ok) return [];
+      const list = await res.json();
+      return Array.isArray(list) ? list : [];
+    } catch (_) { return []; }
+  }
+  async function addVoice(photoId, blob, durationMs) {
+    const audioBase64 = await blobToB64(blob);
+    return api("/api/voice-add", {
+      photoId,
+      durationMs: Math.round(durationMs || 0),
+      mime: (blob && blob.type) || "audio/webm",
+      audioBase64,
+    });
+  }
+  const deleteVoice = (photoId, voiceId) => api("/api/voice-del", { photoId, voiceId });
+
   /* 版本号：客户端每 60 秒只拉这个几十字节的文件，判断有没有新动态 */
   async function version() {
     if (!configured()) return 0;
@@ -417,8 +438,9 @@ window.MuseCloud = (function () {
 
   return {
     CFG, configured, loggedIn, currentUser, setConfig, login, logout,
-    loadWall, loadComments, version, cacheWall,
+    loadWall, loadComments, loadVoices, version, cacheWall,
     setLike, addComment, likeComment, deleteComment, saveStory, deleteMemory, claim,
+    addVoice, deleteVoice,
     uploadPhoto, flushQueue, queuedCount,
     startRealtime, stopRealtime, refreshInbox, startPolling, stopPolling,
     notifications, unreadCount, markAllRead, markRead, clearNotifications,

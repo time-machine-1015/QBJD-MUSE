@@ -207,6 +207,11 @@ async function loadComments(cfg, photoId) {
   if (!f.exists || !f.text) return [];
   try { const a = JSON.parse(f.text); return Array.isArray(a) ? a : []; } catch (_) { return []; }
 }
+async function loadVoiceFile(cfg, photoId) {
+  const f = await readFile(cfg, "voices/" + photoId + ".json", cfg.branch);
+  if (!f.exists || !f.text) return [];
+  try { const a = JSON.parse(f.text); return Array.isArray(a) ? a : []; } catch (_) { return []; }
+}
 const wallFile = (wall, at) => ({ path: "state/wall.json", text: JSON.stringify({ ...wall, updatedAt: at }, null, 2) });
 const versionFile = (at) => ({ path: "state/version.json", text: JSON.stringify({ v: at, at }, null, 2) });
 const inboxFile = (user, list) => ({ path: "inbox/" + String(user).toLowerCase() + ".json", text: JSON.stringify(list.slice(0, MAX_INBOX), null, 2) });
@@ -409,6 +414,46 @@ async function opClaim(cfg, env, actor, p) {
   return { wall, version: at, event: null };
 }
 
+/* ---------- 声音（说说）：一次操作 = 一个提交，记录按照片归档 ---------- */
+/* 上传一段录音：音频二进制进 audio/，记录进 voices/<photoId>.json（字段与旧版 voices.json 兼容） */
+async function opVoiceAdd(cfg, env, actor, p) {
+  if (!p.photoId) throw new HttpError(400, "缺少照片");
+  const b64 = String(p.audioBase64 || "");
+  if (!b64) throw new HttpError(400, "录音为空");
+  const wall = await loadWall(cfg);
+  if (!wall.memories.some((x) => x.id === p.photoId)) throw new HttpError(404, "照片不存在");
+  const ext = String(p.mime || "audio/webm").split("/")[1] || "webm";
+  const id = `${Date.now()}-${randomId(6)}.${ext}`;
+  const list = await loadVoiceFile(cfg, p.photoId);
+  const at = Date.now();
+  const row = { id, author: actor, path: "audio/" + id, duration_ms: Math.round(p.durationMs || 0), duration: Math.round(p.durationMs || 0), createdAt: at, memory_id: p.photoId };
+  const files = [
+    { path: "audio/" + id, base64: b64 },
+    { path: "voices/" + p.photoId + ".json", text: JSON.stringify([...list, row], null, 2) },
+    versionFile(at),
+  ];
+  await commitFiles(cfg, files, `voice ${id} on ${p.photoId} by ${actor}`);
+  return { voice: row, count: list.length + 1, version: at };
+}
+
+/* 删除自己的录音（仅移除记录；音频文件保留在历史提交，不影响他人已播过的缓存） */
+async function opVoiceDelete(cfg, env, actor, p) {
+  const list = await loadVoiceFile(cfg, p.photoId);
+  const row = list.find((v) => String(v.id) === String(p.voiceId));
+  if (!row) {
+    if (list.some((v) => String(v.id) === String(p.voiceId))) throw new HttpError(404, "状态已变化");
+    return { noop: true, count: list.length, version: Date.now() };   /* 幂等：删两次不报错 */
+  }
+  if (String(row.author).toLowerCase() !== actor.toLowerCase()) throw new HttpError(403, "只能删自己的录音");
+  const at = Date.now();
+  const files = [
+    { path: "voices/" + p.photoId + ".json", text: JSON.stringify(list.filter((v) => v !== row), null, 2) },
+    versionFile(at),
+  ];
+  await commitFiles(cfg, files, `delete voice ${p.voiceId} by ${actor}`);
+  return { count: list.length - 1, version: at };
+}
+
 /* ---------- 会话 ---------- */
 async function issueToken(cfg, user) {
   const payload = JSON.stringify({ u: user, exp: Date.now() + 60 * 24 * 3600 * 1000 });
@@ -489,7 +534,10 @@ export async function handle(request, env) {
         else if (route === "/api/delete") result = await opDelete(cfg, env, actor, p);
         else if (route === "/api/comment-delete") result = await opCommentDelete(cfg, env, actor, p);
         else if (route === "/api/claim") result = await opClaim(cfg, env, actor, p);
+        else if (route === "/api/voice-add") result = await opVoiceAdd(cfg, env, actor, p);
+        else if (route === "/api/voice-del") result = await opVoiceDelete(cfg, env, actor, p);
         else if (route === "/api/comments") { result = { comments: await loadComments(cfg, p.photoId) }; }
+        else if (route === "/api/voices") { result = { voices: await loadVoiceFile(cfg, p.photoId) }; }
         else if (route === "/api/wall") { result = { wall: await loadWall(cfg) }; }
         else return json({ ok: false, error: "unknown-route" }, 404);
         break;

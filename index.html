@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -1139,6 +1139,7 @@ body.lock-scroll { overflow: hidden; }
   .pv-face.pv-back { padding: 18px 16px; }
 }
 </style>
+<link rel="stylesheet" href="./memory-room/memory-room.css">
 </head>
 <body>
 
@@ -1260,13 +1261,96 @@ body.lock-scroll { overflow: hidden; }
   <button class="pv-btn pv-close" id="pvClose" title="关闭">✕</button>
 </div>
 
-<!-- 回忆查看器（3D 粒子 + 故事浮现） -->
-<div class="memo-layer" id="memoLayer" hidden>
-  <canvas id="memoCanvas"></canvas>
-  <div class="memo-text" id="memoText"></div>
-  <button class="memo-btn memo-edit" id="btnMemoEdit">✎ 写下这段故事</button>
-  <button class="memo-btn memo-close" id="btnMemoClose" title="关闭">✕</button>
-</div>
+<!-- 回忆收存室（说说 · 化作星尘 3D 粒子 + 大家的回忆声音） -->
+<section id="memory-room" aria-label="回忆收存室">
+
+  <canvas class="mr-canvas mr-canvas--ambience" aria-hidden="true"></canvas>
+  <canvas class="mr-canvas mr-canvas--particles" aria-hidden="true"></canvas>
+
+  <!-- 左上：大家的回忆（音频列表）触发 -->
+  <button class="mr-archive-trigger" type="button" aria-expanded="false" aria-controls="mr-drawer">
+    <span class="mr-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+    <span class="mr-label">回忆</span><span class="mr-count">0</span>
+  </button>
+
+  <!-- 右上：关闭（返回回忆墙） -->
+  <button class="mr-close" id="mr-btn-close" type="button" aria-label="返回回忆墙">✕</button>
+
+  <!-- 右上：标题 + 参数 + 状态 -->
+  <div class="mr-brand">
+    <h1 class="mr-title">说说</h1>
+    <div class="mr-coord" id="mr-coord">—— · ——</div>
+    <div class="mr-status" id="mr-status"></div>
+  </div>
+
+  <!-- 章节字距标题 -->
+  <div class="mr-chapter" aria-hidden="true">
+    <div class="mr-chapter-text">化 作 星 尘</div>
+    <div class="mr-chapter-sub">memory room &middot; voices</div>
+  </div>
+
+  <!-- 底部控制栈 -->
+  <div class="mr-stack">
+    <div class="mr-transcript is-idle" id="mr-transcript" aria-live="polite">
+      <span class="mr-transcript-role" id="mr-transcript-role"></span>
+      <span class="mr-transcript-text" id="mr-transcript-text">按住 · 录下你对这张照片想说的话</span>
+    </div>
+
+    <div class="mr-mic-wrap">
+      <span class="mr-rec-dot" aria-hidden="true"></span>
+      <button class="mr-speak" id="mr-speak" type="button"
+              aria-label="按住说话，录下对这张照片想说的话">
+        <span class="mr-ring" aria-hidden="true"></span>
+        <span class="mr-mic" aria-hidden="true"><span class="mr-mic-stand"></span><span class="mr-mic-base"></span></span>
+      </button>
+    </div>
+
+    <div class="mr-controls">
+      <span class="mr-timer" id="mr-timer" hidden>00:00</span>
+      <button class="mr-ctl mr-ctl--save" id="mr-btn-save" type="button" hidden>上传给大家听 →</button>
+      <button class="mr-ctl mr-ctl--discard" id="mr-btn-discard" type="button" hidden aria-label="放弃这段录音">×</button>
+    </div>
+  </div>
+
+  <!-- 大家的回忆（音频列表）抽屉 -->
+  <div class="mr-veil" id="mr-veil"></div>
+  <aside class="mr-drawer" id="mr-drawer" aria-label="大家的回忆">
+    <div class="mr-drawer-head">
+      <div class="mr-drawer-title">大 家 的 回 忆</div>
+      <div class="mr-drawer-sub" id="mr-drawer-sub">共 0 段声音</div>
+    </div>
+    <div class="mr-drawer-list" id="mr-drawer-list">
+      <div class="mr-empty">还没有人留下声音。<br>按住下方的话筒，<br>录下你对这张照片想说的话。</div>
+    </div>
+  </aside>
+
+  <!-- toast -->
+  <div class="mr-toast" id="mr-toast" role="status"></div>
+
+  <!-- 氛围调节 -->
+  <button class="mr-tune-btn" id="mr-tune-btn" type="button" aria-label="氛围调节" aria-expanded="false">
+    <i></i><i></i><i></i>
+  </button>
+  <div class="mr-tune" id="mr-tune" hidden>
+    <div class="mr-tune-head">
+      <span>氛 围 调 节</span>
+      <button type="button" id="mr-tune-close" aria-label="关闭">×</button>
+    </div>
+    <label class="mr-tune-row"><span>立体感</span><input type="range" data-tune="depth" min="0" max="100" value="30"><b>30</b></label>
+    <label class="mr-tune-row"><span>星星大小</span><input type="range" data-tune="size" min="0" max="100" value="50"><b>50</b></label>
+    <label class="mr-tune-row"><span>起伏幅度</span><input type="range" data-tune="waveAmp" min="0" max="100" value="50"><b>50</b></label>
+    <label class="mr-tune-row"><span>起伏速度</span><input type="range" data-tune="waveSpeed" min="0" max="100" value="50"><b>50</b></label>
+    <label class="mr-tune-row"><span>松散范围</span><input type="range" data-tune="loosenessRange" min="0" max="100" value="50"><b>50</b></label>
+    <label class="mr-tune-row"><span>松散程度</span><input type="range" data-tune="looseness" min="0" max="100" value="50"><b>50</b></label>
+    <label class="mr-tune-row"><span>暗角范围</span><input type="range" data-tune="vignette" min="0" max="100" value="50"><b>50</b></label>
+    <label class="mr-tune-row"><span>明亮度</span><input type="range" data-tune="brightness" min="0" max="100" value="50"><b>50</b></label>
+  </div>
+
+  <div class="mr-loading" id="mr-loading">
+    <div>收 存 室</div>
+    <div class="mr-loading-pct" id="mr-loading-pct">0%</div>
+  </div>
+</section>
 
 <!-- 故事编辑弹窗 -->
 <div class="story-modal" id="storyModal" hidden>
@@ -1327,6 +1411,16 @@ body.lock-scroll { overflow: hidden; }
 <script src="./mqtt-lite.js"></script>
 
 <script src="./cloud.js"></script>
+<!-- 说说（回忆收存室）：3D 粒子 + 氛围调节 + 大家的回忆声音 →
+     memory-room/ 库从 2.x 版本原样恢复（three.js + 后处理 + 主题脚本） -->
+<script src="./memory-room/three.min.js"></script>
+<script src="./memory-room/EffectComposer.js"></script>
+<script src="./memory-room/RenderPass.js"></script>
+<script src="./memory-room/ShaderPass.js"></script>
+<script src="./memory-room/UnrealBloomPass.js"></script>
+<script src="./memory-room/CopyShader.js"></script>
+<script src="./memory-room/LuminosityHighPassShader.js"></script>
+<script src="./memory-room/memory-room.js"></script>
 <script>
 /* ============================================================
  * 回忆收集站（登录后主界面）
@@ -2253,11 +2347,12 @@ void main() {
 
   /* 全屏遮罩打开时（登录层/查看器/弹窗），流光不绘制、画布保持透明，杜绝残影透出 */
   function modalOpenMasked() {
-    const ids = ["photoViewer", "memoLayer", "storyModal", "commentsModal"];
+    const ids = ["photoViewer", "storyModal", "commentsModal"];
     for (const id of ids) {
       const el = document.getElementById(id);
       if (el && !el.hidden) return true;
     }
+    if (window.MemoryRoom && document.getElementById("memory-room").classList.contains("is-open")) return true;
     const ll = document.getElementById("loginLayer");
     if (ll && !ll.classList.contains("hidden") && !ll.classList.contains("leaving")) return true;
     return false;
@@ -2716,7 +2811,7 @@ const photoViewer = (() => {
     if (!current) return;
     const m = current;
     close();
-    setTimeout(() => memoViewer.open(m), 320);   // 换场后粒子迸发
+    setTimeout(() => openMemoryRoom(m), 320);   // 换场后进入说说（回忆收存室）
   });
 
   return {
@@ -2729,174 +2824,53 @@ const photoViewer = (() => {
   };
 })();
 
-/* ---------- 四、3D 粒子回忆查看器 ---------- */
-const memoViewer = (() => {
-  const HOLD = 0.95;         // 粒子拼出照片的停留秒数
-  let openId = null, state = null, raf = 0, lastT = 0;
+/* ============================================================
+ * 四、说说（回忆收存室：化身星尘 3D 粒子 + 氛围调节 + 大家的回忆声音）
+ * 云架构版：照片与声音走数据仓库（读 raw 秒级），上传/删除走云函数
+ *（一次提交 + CAS 并发保护，替代旧版前端直写 GitHub 的覆盖风险）
+ * 界面与粒子引擎来自 memory-room/（three.js 原版）
+ * ============================================================ */
 
-  function buildStory(m) {
-    const box = $("memoText");
-    box.innerHTML = "";
-    const dateP = document.createElement("p");
-    dateP.className = "memo-line memo-date";
-    dateP.textContent = "— " + fmtDate(m.createdAt) + " —";
-    dateP.style.animationDelay = "1.1s";
-    box.appendChild(dateP);
-    const lines = (m.story || "").split(/\n+/).map((s) => s.trim()).filter(Boolean);
-    if (!lines.length) {
-      const hint = document.createElement("p");
-      hint.className = "memo-line";
-      hint.textContent = "这段回忆还没有故事，点击右上角 ✎ 为它写一个吧";
-      hint.style.animationDelay = "1.6s";
-      box.appendChild(hint);
-    } else {
-      const step = lines.length > 6 ? 0.55 : 1.0;
-      lines.forEach((text, i) => {
-        const p = document.createElement("p");
-        p.className = "memo-line";
-        p.textContent = text;
-        p.style.animationDelay = (1.35 + i * step) + "s";
-        box.appendChild(p);
-      });
-    }
-  }
+/* 本机模式（云端未配置）下，说说依赖共享存储，直接拦下 */
+function openMemoryRoom(m) {
+  if (!cloudConfigured()) { toast("说说需要登录后使用"); return; }
+  if (!window.MemoryRoom) { toast("说说模块未加载，刷新一下就好"); return; }
+  /* 桥接：录音上传 / 删除自己的录音——全部走云函数 */
+  window.MemoryRoom.setBridge({
+    onRecord: (blob, durationMs) => MuseCloud.addVoice(m.id, blob, durationMs),
+    onDelete: (voiceId) => MuseCloud.deleteVoice(m.id, voiceId),
+    onClose: () => {},
+  });
+  window.MemoryRoom.setUser(MuseCloud.currentUser());
+  /* 先开界面（加载幕布），再喂照片 blob；照片就绪后补声音列表 */
+  window.MemoryRoom.open(null, m.author || "回忆");
+  (async () => {
+    try {
+      let resp = await fetch(m.url);
+      if (!resp.ok && m.sbUrl) resp = await fetch(m.sbUrl);
+      const blob = await resp.blob();
+      window.MemoryRoom && window.MemoryRoom.setPhoto(blob, m.author || "回忆");
+    } catch (_) { toast("照片加载失败，请检查网络"); }
+    try {
+      const rows = await MuseCloud.loadVoices(m.id);
+      if (window.MemoryRoom) window.MemoryRoom.setVoices(voiceListFrom(rows));
+    } catch (_) { /* 声音列表失败不阻塞收存室 */ }
+  })();
+}
 
-  function setup(img) {
-    cancelAnimationFrame(raf);
-    const cv = $("memoCanvas"), ctx = cv.getContext("2d");
-    const W = innerWidth, H = innerHeight;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    cv.width = Math.round(W * dpr);
-    cv.height = Math.round(H * dpr);
-    cv.style.width = W + "px";
-    cv.style.height = H + "px";
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    /* 照片采样 → 粒子（约 7200 粒） */
-    const MAXSIDE = 470;
-    const sc = Math.min(1, MAXSIDE / Math.max(img.naturalWidth, img.naturalHeight));
-    const iw = Math.max(4, Math.round(img.naturalWidth * sc));
-    const ih = Math.max(4, Math.round(img.naturalHeight * sc));
-    const off = document.createElement("canvas");
-    off.width = iw; off.height = ih;
-    const octx = off.getContext("2d");
-    octx.drawImage(img, 0, 0, iw, ih);
-    const data = octx.getImageData(0, 0, iw, ih).data;
-    const gap = Math.max(2, Math.round(Math.sqrt((iw * ih) / 7200)));
-    const ps = [];
-    for (let y = 0; y < ih; y += gap) {
-      for (let x = 0; x < iw; x += gap) {
-        const i = (y * iw + x) * 4;
-        if (data[i + 3] < 40) continue;
-        const r = data[i], g = data[i + 1], b = data[i + 2];
-        ps.push({
-          x: x - iw / 2, y: y - ih / 2, z: 0,
-          vx: (Math.random() - 0.5) * 95,
-          vy: (Math.random() - 0.5) * 95 - 26,
-          vz: 130 + Math.random() * 430,
-          size: Math.max(1.6, gap * 0.92),
-          c0: `rgb(${r},${g},${b})`,
-          c1: `rgb(${Math.min(255, r + 45)},${Math.min(255, g + 45)},${Math.min(255, b + 45)})`,
-        });
-      }
-    }
-    state = { ctx, ps, W, H, origin: { x: W / 2, y: H * 0.4 }, t: 0 };
-    lastT = performance.now();
-    raf = requestAnimationFrame(loop);
-  }
-
-  function loop(now) {
-    if (!state) return;
-    const { ctx, ps, origin, W, H } = state;
-    const dt = Math.min(0.05, (now - lastT) / 1000 || 0.016);
-    lastT = now;
-    state.t += dt;
-    const t = state.t;
-    const burst = Math.max(0, t - HOLD);
-    ctx.clearRect(0, 0, W, H);
-    const rotY = burst * 0.5;
-    const cosR = Math.cos(rotY), sinR = Math.sin(rotY);
-    const breathe = 1 + 0.006 * Math.sin(t * 2.2);
-    for (const p of ps) {
-      let x, y, z, alpha, color;
-      if (burst > 0) {
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.z += p.vz * dt;
-        const rx = p.x * cosR - p.z * sinR;
-        const rz = p.x * sinR + p.z * cosR;
-        x = rx; y = p.y; z = rz;
-        alpha = Math.max(0, 1 - z / 950);
-        color = p.c1;
-      } else {
-        x = p.x * breathe; y = p.y * breathe; z = 0;
-        alpha = 1;
-        color = p.c0;
-      }
-      if (z > 1400 || alpha <= 0.02) continue;
-      const f = 640 / (640 + z);
-      const sx = origin.x + x * f;
-      const sy = origin.y + y * f;
-      if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
-      const s = Math.max(0.6, p.size * f);
-      ctx.globalAlpha = alpha * (0.55 + 0.45 * f);
-      ctx.fillStyle = color;
-      ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
-    }
-    ctx.globalAlpha = 1;
-    raf = requestAnimationFrame(loop);
-  }
-
-  function startParticles(m) {
-    const img = new Image();
-    img.crossOrigin = "anonymous";   // 云端图片采样需要（GitHub Pages 同源/Supabase 放开 CORS）
-    img.onload = () => { if (openId === m.id) setup(img); };
-    img.onerror = () => {                       // GitHub 源失败自动回退 Supabase
-      img.onerror = null;
-      if (m.sbUrl && img.src !== m.sbUrl) { img.src = m.sbUrl; return; }
-    };
-    img.src = m.url;
-  }
-
-  function open(m) {
-    openId = m.id;
-    const L = $("memoLayer");
-    L.hidden = false;
-    document.body.classList.add("lock-scroll");
-    requestAnimationFrame(() => L.classList.add("show"));
-    buildStory(m);
-    $("btnMemoEdit").textContent = (m.story || "").trim() ? "✎ 修改故事" : "✎ 写下这段故事";
-    startParticles(m);
-  }
-
-  function close() {
-    if (!openId) return;
-    openId = null;
-    const L = $("memoLayer");
-    L.classList.remove("show");
-    document.body.classList.remove("lock-scroll");
-    setTimeout(() => { L.hidden = true; specularGlow.wake(); }, 480);
-    cancelAnimationFrame(raf);
-    state = null;
-    const cv = $("memoCanvas");
-    cv.width = cv.width;   // 清空画布
-    $("memoText").innerHTML = "";
-  }
-
-  $("btnMemoClose").addEventListener("click", close);
-
-  return {
-    open,
-    close,
-    currentId: () => openId,
-    refresh(m) {
-      if (openId !== m.id) return;
-      buildStory(m);
-      $("btnMemoEdit").textContent = (m.story || "").trim() ? "✎ 修改故事" : "✎ 写下这段故事";
-    },
-  };
-})();
-
+/* 云端声音记录 → memory-room 消费的格式（按时间倒序 + 数据仓库绝对地址） */
+function voiceListFrom(rows) {
+  const base = (window.MuseCloud && MuseCloud.CFG) ? MuseCloud.CFG.DATA : "";
+  return (rows || []).slice()
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .map((v) => ({
+      id: v.id,
+      author: v.author || "",
+      audioUrl: base + "/" + (v.path || v.audio_path || ""),
+      duration: (v.duration ?? v.duration_ms) || 0,
+      createdAt: v.createdAt || 0,
+    }));
+}
 /* ---------- 四c、删除确认弹窗 ---------- */
 let pendingDeleteId = null;
 function openDelConfirm(id) {
@@ -2942,7 +2916,6 @@ function hideStoryModal() {
   modal.classList.remove("show");
   setTimeout(() => { modal.hidden = true; specularGlow.wake(); }, 320);
 }
-$("btnMemoEdit").addEventListener("click", () => showStoryModal(memoViewer.currentId()));
 $("btnStoryCancel").addEventListener("click", hideStoryModal);
 $("storyModal").addEventListener("click", (e) => { if (e.target.id === "storyModal") hideStoryModal(); });
 $("btnStorySave").addEventListener("click", async () => {
@@ -2958,7 +2931,6 @@ $("btnStorySave").addEventListener("click", async () => {
     }
   } catch (_) { toast("保存失败，请重试"); return; }
   renderGrid();
-  memoViewer.refresh(m);
   photoViewer.refresh(m);
   hideStoryModal();
   toast("这段故事已收好 ✦");
@@ -3263,7 +3235,7 @@ document.addEventListener("keydown", (e) => {
   else if (!$("storyModal").hidden) hideStoryModal();
   else if (!$("commentsModal").hidden) hideCommentsModal();
   else if (!$("photoViewer").hidden) photoViewer.close();
-  else if (!$("memoLayer").hidden) memoViewer.close();
+  else if (window.MemoryRoom && document.getElementById("memory-room").classList.contains("is-open")) window.MemoryRoom.close();
 });
 
 /* ---------- 五、初始化 ---------- */
