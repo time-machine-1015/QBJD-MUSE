@@ -10,9 +10,9 @@
  * ============================================================ */
 window.MuseCloud = (function () {
   const CFG = {
-    /* ← 部署完把这两个地址填上（填错就自动退回"本机模式"，不会白屏） */
-    API: "",      /* 例：https://qbjd-muse-write.deno.dev */
-    DATA: "",     /* 例：https://time-machine-1015.github.io/QBJD-MUSE-data */
+    /* 云端地址：读 = 数据仓库 Pages；写 = Deno Deploy 云函数（填错自动退回本机模式，不会白屏） */
+    API: "https://qbjd-muse-write.deno.dev",
+    DATA: "https://time-machine-1015.github.io/QBJD-MUSE-data",
 
     LEGACY_PHOTOS: "https://time-machine-1015.github.io/QBJD-MUSE/photos/",   /* 旧站照片兜底 */
     MQTT: "wss://broker.emqx.io:8084/mqtt",                                   /* 阶段 3 用 */

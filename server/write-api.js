@@ -228,10 +228,14 @@ async function opUpload(cfg, env, actor, p) {
   const wall = await loadWall(cfg);
   const id = p.fileName || `${Date.now()}-${randomId(6)}.jpeg`;
   const at = Date.now();
+  /* 迁移老照片专用：带对 migrationKey（= 服务端 SESSION_SECRET）时，允许指定作者，
+     传空字符串就是"无主"，等朋友自己在页面上认领。普通上传永远只能署自己的名。 */
+  const migrating = !!p.migrationKey && !!cfg.secret && p.migrationKey === cfg.secret;
+  const author = migrating ? String(p.author || "") : actor;
   const memory = {
     id,
     createdAt: p.createdAt || at,
-    author: actor,
+    author,
     story: p.story || "",
     season: Number.isInteger(p.season) ? p.season : null,
     likes: [],
@@ -242,14 +246,14 @@ async function opUpload(cfg, env, actor, p) {
     thumb: "photos/thumb_" + id,
   };
   wall.memories = [memory, ...wall.memories.filter((m) => m.id !== id)];
-  const event = { id: randomId(10), type: "new_photo", actor, photoId: id, at, text: "" };
+  const event = { id: randomId(10), type: "new_photo", actor: author || actor, photoId: id, at, text: "" };
   const files = [
     { path: "photos/" + id, base64: p.imageBase64 },
     { path: "photos/thumb_" + id, base64: p.thumbBase64 || p.imageBase64 },
     wallFile(wall, at),
     versionFile(at),
   ];
-  const recipients = users(env).filter((u) => u !== actor.toLowerCase());
+  const recipients = migrating ? [] : users(env).filter((u) => u !== actor.toLowerCase());
   await deliver(cfg, recipients, event, files);
   const r = await commitFiles(cfg, files, `add memory ${id} by ${actor}`);
   return { event, recipients, wall, version: at, commit: r.commit };

@@ -62,6 +62,12 @@ body {
 .aero-bg.season-spring {
   background: linear-gradient(180deg, #221229 0%, #160e1d 45%, #0d0b12 100%);
 }
+/* 移动端静态背景：动态粒子在手机上耗电易卡顿，≤700px 时改用季节静态图（引擎全部停用） */
+.aero-bg.season-static {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
 
 /* 细颗粒星点（配合 AeroShards grain） */
 body::after {
@@ -3514,16 +3520,38 @@ const pixelSnow = (() => {
   };
 })();
 
-/* ---------- 季节背景联动：春=Antigravity 磁力环 / 夏=星尘云 / 秋=AeroShards 碎片流 / 冬=像素雪 ---------- */
+/* ---------- 季节背景联动：春=Antigravity 磁力环 / 夏=星尘云 / 秋=AeroShards 碎片流 / 冬=像素雪 ----------
+   移动端（≤700px，与登录页移动端判定同一断点）：粒子引擎全部停用，改用对应季节静态背景图；
+   桌面端逻辑不变。跨过断点（旋转屏幕/调窗口）时自动在静态图与动态粒子间切换 */
+const SEASON_BG_IMGS = ["bg/spring.jpg", "bg/summer.jpg", "bg/autumn.jpg", "bg/winter.jpg"];
+const mobileBgMQ = window.matchMedia("(max-width: 700px)");
 function applySeasonBg(i) {
   const bg = document.querySelector(".aero-bg");
   bg.classList.toggle("season-summer", i === 1);
   bg.classList.toggle("season-spring", i === 0);
+  if (mobileBgMQ.matches) {                       // 移动端：静态季节图
+    bg.classList.add("season-static");
+    aeroShards.stop(); pixelSnow.stop(); starParticles.stop(); antiGravity.stop();
+    bg.style.backgroundImage = `url("${SEASON_BG_IMGS[i] || SEASON_BG_IMGS[3]}")`;
+    return;
+  }
+  bg.classList.remove("season-static");
+  bg.style.backgroundImage = "";
   if (i === 0) { aeroShards.stop(); pixelSnow.stop(); starParticles.stop(); antiGravity.start(); }
   else if (i === 1) { aeroShards.stop(); pixelSnow.stop(); antiGravity.stop(); starParticles.start(); }
   else if (i === 3) { aeroShards.stop(); starParticles.stop(); antiGravity.stop(); pixelSnow.start(); }
   else { pixelSnow.stop(); starParticles.stop(); antiGravity.stop(); aeroShards.start(); }
 }
+mobileBgMQ.addEventListener?.("change", () => applySeasonBg(seasonIdx));
+/* 预加载背景图：当前季节立即加载，其余空闲时加载，切季节不闪白 */
+(function preloadSeasonBgs() {
+  SEASON_BG_IMGS.forEach((src, k) => {
+    const load = () => { const im = new Image(); im.decoding = "async"; im.src = src; };
+    if (k === seasonIdx) { load(); return; }
+    if ("requestIdleCallback" in window) requestIdleCallback(load, { timeout: 8000 });
+    else setTimeout(load, 4000);
+  });
+})();
 
 /* ---------- 〇d、Particles 星尘云（夏季背景，原生 WebGL 移植 React Bits Particles） ----------
  * 参数对应（组件默认）：particleCount 200 · spread 10 · speed 0.1
