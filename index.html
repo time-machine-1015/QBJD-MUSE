@@ -1069,6 +1069,10 @@ body.lock-scroll { overflow: hidden; }
   box-shadow: 0 20px 60px rgba(0,0,0,0.55);
   z-index: 75; overflow: hidden;
 }
+/* 【修复】.notif-panel 自带 display:flex 会废掉 hidden 属性 → 点 ✕ 后面板视觉上不消失。
+   补上 [hidden] 覆盖（与 .photo-viewer[hidden] / .story-modal[hidden] 同一模式） */
+.notif-panel[hidden] { display: none; }
+.notif-pop[hidden] { display: none; }
 .notif-head { display: flex; align-items: center; gap: 8px; padding: 13px 14px 8px; color: var(--text); }
 .notif-head b { font-size: 15px; letter-spacing: 0.5px; }
 .notif-head .spacer { margin-left: auto; }
@@ -2839,7 +2843,7 @@ function openMemoryRoom(m) {
   window.MemoryRoom.setBridge({
     onRecord: (blob, durationMs) => MuseCloud.addVoice(m.id, blob, durationMs),
     onDelete: (voiceId) => MuseCloud.deleteVoice(m.id, voiceId),
-    onClose: () => {},
+    onClose: () => { if (window.MemoryRoom) window.MemoryRoom.close(); },   /* 收存室的 ✕ 走宿主回调：必须真正执行关闭（此前传空函数导致点不动） */
   });
   window.MemoryRoom.setUser(MuseCloud.currentUser());
   /* 先开界面（加载幕布），再喂照片 blob；照片就绪后补声音列表 */
@@ -2860,7 +2864,7 @@ function openMemoryRoom(m) {
 
 /* 云端声音记录 → memory-room 消费的格式（按时间倒序 + 数据仓库绝对地址） */
 function voiceListFrom(rows) {
-  const base = (window.MuseCloud && MuseCloud.CFG) ? MuseCloud.CFG.DATA : "";
+  const base = (window.MuseCloud && MuseCloud.dataBase) ? MuseCloud.dataBase() : "";
   return (rows || []).slice()
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     .map((v) => ({
@@ -3130,7 +3134,7 @@ function showNextNotifPop() {
   notifPopBusy = true;
   const t = notifText(n);
   const m = memories.find((x) => x.id === n.photoId);
-  const thumb = (m && m.thumbUrl) || (n.photoId && cloudConfigured() ? MuseCloud.CFG.DATA + "/photos/thumb_" + n.photoId : "");
+  const thumb = (m && m.thumbUrl) || (n.photoId && cloudConfigured() ? MuseCloud.dataBase() + "/photos/thumb_" + n.photoId : "");
   notifPop.hidden = false;
   notifPop.dataset.id = n.id;
   notifPop.innerHTML = `<div class="np-icon">${t.icon}</div>

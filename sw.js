@@ -8,7 +8,7 @@
  * 浏览器（Safari/Chrome）不受影响，正常提供缓存加速。 */
 const IS_APP_WEBVIEW = /;\s*wv\)/i.test(self.navigator && self.navigator.userAgent || "");
 
-const CACHE = "qbjd-muse-v5";
+const CACHE = "qbjd-muse-v6";
 const SHELL = ["./index.html", "./cloud.js", "./manifest.json", "./icon-192.png", "./icon-512.png",
   "./bg/spring2.jpg", "./bg/summer2.jpg", "./bg/autumn2.jpg", "./bg/winter2.jpg"];   // 季节静态背景 v2（去水印）
 
@@ -74,6 +74,9 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== self.location.origin) return;
   /* 登录背景视频较大（13MB），走网络不缓存 */
   if (/\.(mp4|webm)$/.test(url.pathname)) return;
+  /* 带 ?cb 缓存穿透参数的数据读（数据仓库同源 JSON）：直连网络、不入缓存。
+     这些 URL 各不相同（时间戳），若入缓存会把 caches 撑爆；断网时由 localStorage 墙快照兑底 */
+  if (url.searchParams.has("cb")) return;
 
   /* 首页：网络优先，成功后更新缓存；断网时用缓存兜底 */
   if (e.request.mode === "navigate" || /\/index\.html$/.test(url.pathname)) {

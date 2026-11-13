@@ -10,10 +10,9 @@
  * ============================================================ */
 window.MuseCloud = (function () {
   const CFG = {
-    /* 云端地址：读 = 数据仓库的 raw 源（不经 Pages 构建，永不存在 404 窗口，且 query 可穿透缓存、更新秒级可见）；
-       写 = Deno Deploy 云函数 */
+    /* 云端地址：写 = Deno Deploy 云函数；读 = 数据仓库多源（见 DATA_BASES，按序自动回退） */
     API: "https://qbjd-muse-write.time-machine-1015.deno.net",
-    DATA: "https://raw.githubusercontent.com/time-machine-1015/QBJD-MUSE-data/main",
+    DATA: "https://time-machine-1015.github.io/QBJD-MUSE-data",   /* 兼容旧引用：指向首选源 */
 
     LEGACY_PHOTOS: "https://time-machine-1015.github.io/QBJD-MUSE/photos/",   /* 旧站照片兜底 */
     MQTT: "wss://broker.emqx.io:8084/mqtt",                                   /* 阶段 3 用 */
@@ -27,6 +26,18 @@ window.MuseCloud = (function () {
   };
 
   const configured = () => !!CFG.API && !!CFG.DATA;
+  /* 数据仓库读源（按序自动回退）：
+     0 = GitHub Pages：主源，?cb 穿透 CDN 缓存（秒级新鲜）；写操作后的构建窗口期会短暂 404，
+        此时自动切下一个。国内手机网络可达（主站同域名）。
+     1 = jsDelivr：国内 CDN、不经 Pages 构建（无 404 窗口），构建窗口期兑底；内容可能滞后。
+     2 = raw.githubusercontent：最原始，但国内移动网络常被 DNS 阻断，仅作最后手段。 */
+  const DATA_BASES = [
+    "https://time-machine-1015.github.io/QBJD-MUSE-data",
+    "https://cdn.jsdelivr.net/gh/time-machine-1015/QBJD-MUSE-data@main",
+    "https://raw.githubusercontent.com/time-machine-1015/QBJD-MUSE-data/main",
+  ];
+  let dataIdx = 0;
+  const dataBase = () => DATA_BASES[dataIdx];
   const read = (k) => { try { return localStorage.getItem(k) || ""; } catch (_) { return ""; } };
   const write = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (_) {} };
 
@@ -93,7 +104,30 @@ window.MuseCloud = (function () {
 
   /* ---------- 读 ---------- */
   function snapshotUrl(path) {
-    return CFG.DATA + "/" + String(path).replace(/^\/+/, "") + "?cb=" + Date.now();
+    return dataBase() + "/" + String(path).replace(/^\/+/, "") + "?cb=" + Date.now();
+  }
+  /* 多源快照读：永远从主源（Pages）开始逐个试，404（构建窗口）/5xx/网络失败自动回退下一个源；
+     全部失败才抛错。成功即固化当前源，供照片等静态资源同源取用。 */
+  async function fetchSnapshot(path, timeoutMs) {
+    timeoutMs = timeoutMs || 10000;
+    let lastErr = null;
+    for (let k = 0; k < DATA_BASES.length; k++) {
+      const url = DATA_BASES[k] + "/" + String(path).replace(/^\/+/, "") + "?cb=" + Date.now();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+        clearTimeout(timer);
+        if (res.ok) { dataIdx = k; return res; }
+        lastErr = new Error("HTTP " + res.status);
+        if (res.status >= 500 || res.status === 404) continue;   /* 构建窗口/抖动：换源重试 */
+        throw lastErr;
+      } catch (e) {
+        clearTimeout(timer);
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("数据源全部不可用");
   }
 
   /* 把仓库里的记录转成页面认识的结构（字段名与旧版保持一致，页面代码不用改） */
@@ -114,8 +148,8 @@ window.MuseCloud = (function () {
       comments: [],
       commentCount: r.commentCount || 0,
       image_path: r.id,
-      url: CFG.DATA + "/" + image,
-      thumbUrl: CFG.DATA + "/" + thumb,
+      url: dataBase() + "/" + image,
+      thumbUrl: dataBase() + "/" + thumb,
       sbUrl: CFG.LEGACY_PHOTOS + r.id,                 /* 旧站兜底（图片加载失败时自动切换） */
       sbThumb: CFG.LEGACY_PHOTOS + "thumb_" + r.id,
       w: r.w || 0, h: r.h || 0,
@@ -126,14 +160,12 @@ window.MuseCloud = (function () {
     if (!configured()) throw new Error("尚未配置云端地址");
     let res;
     try {
-      res = await fetch(snapshotUrl("state/wall.json"), { cache: "no-store" });
+      res = await fetchSnapshot("state/wall.json", 12000);
     } catch (e) {
       const cached = read(CFG.WALL_CACHE_KEY);
       if (cached) { try { return JSON.parse(cached).map(toMemory); } catch (_) {} }
       throw e;
     }
-    if (res.status === 404) { cacheWall([]); return []; }        /* 数据仓库刚建好还没内容 */
-    if (!res.ok) throw new Error("回忆墙读取失败 HTTP " + res.status);
     const wall = await res.json();
     const list = (Array.isArray(wall.memories) ? wall.memories : [])
       .slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -146,7 +178,7 @@ window.MuseCloud = (function () {
 
   async function loadComments(photoId) {
     try {
-      const res = await fetch(snapshotUrl("comments/" + photoId + ".json"), { cache: "no-store" });
+      const res = await fetchSnapshot("comments/" + photoId + ".json", 8000);
       if (!res.ok) return [];
       const list = await res.json();
       return Array.isArray(list) ? list : [];
@@ -157,7 +189,7 @@ window.MuseCloud = (function () {
      blobToB64 复用上方 uploadPhoto 已有的实现 */
   async function loadVoices(photoId) {
     try {
-      const res = await fetch(snapshotUrl("voices/" + photoId + ".json"), { cache: "no-store" });
+      const res = await fetchSnapshot("voices/" + photoId + ".json", 8000);
       if (!res.ok) return [];
       const list = await res.json();
       return Array.isArray(list) ? list : [];
@@ -178,8 +210,7 @@ window.MuseCloud = (function () {
   async function version() {
     if (!configured()) return 0;
     try {
-      const res = await fetch(snapshotUrl("state/version.json"), { cache: "no-store" });
-      if (!res.ok) return 0;
+      const res = await fetchSnapshot("state/version.json", 8000);
       const v = await res.json();
       return Number(v && v.v) || 0;
     } catch (_) { return 0; }
@@ -270,7 +301,7 @@ window.MuseCloud = (function () {
   async function refreshInbox() {
     if (!loggedIn()) return 0;
     try {
-      const res = await fetch(snapshotUrl("inbox/" + user.toLowerCase() + ".json"), { cache: "no-store" });
+      const res = await fetchSnapshot("inbox/" + user.toLowerCase() + ".json", 8000);
       if (!res.ok) return 0;
       const list = await res.json();
       let added = 0;
@@ -437,7 +468,7 @@ window.MuseCloud = (function () {
   if (loggedIn()) { startRealtime(mqttInfo); startPolling(); }
 
   return {
-    CFG, configured, loggedIn, currentUser, setConfig, login, logout,
+    CFG, configured, loggedIn, currentUser, setConfig, login, logout, dataBase, DATA_BASES,
     loadWall, loadComments, loadVoices, version, cacheWall,
     setLike, addComment, likeComment, deleteComment, saveStory, deleteMemory, claim,
     addVoice, deleteVoice,
