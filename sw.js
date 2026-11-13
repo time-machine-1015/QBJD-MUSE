@@ -8,9 +8,9 @@
  * 浏览器（Safari/Chrome）不受影响，正常提供缓存加速。 */
 const IS_APP_WEBVIEW = /;\s*wv\)/i.test(self.navigator && self.navigator.userAgent || "");
 
-const CACHE = "qbjd-muse-v6";
+const CACHE = "qbjd-muse-v7";
 const SHELL = ["./index.html", "./cloud.js", "./manifest.json", "./icon-192.png", "./icon-512.png",
-  "./bg/spring2.jpg", "./bg/summer2.jpg", "./bg/autumn2.jpg", "./bg/winter2.jpg"];   // 季节静态背景 v2（去水印）
+  "./bg/spring3.jpg", "./bg/summer3.jpg", "./bg/autumn3.jpg", "./bg/winter3.jpg"];   // 季节静态背景 v3（水印像素级修补）
 
 self.addEventListener("install", (e) => {
   if (IS_APP_WEBVIEW) {
